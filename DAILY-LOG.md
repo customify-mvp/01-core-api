@@ -247,7 +247,70 @@ await session.refresh(model)
    - Use case factory
    - Session management
 
-### 🔗 Referencias
+### � Issues Menores Corregidos (Post-Session)
+
+#### Issue #1: Design Converter - JSONB Handling
+**Problema:** design_data puede venir como string en algunos drivers asyncpg
+**Solución:** Agregado manejo defensivo en `design_converter.py`:
+```python
+import json
+
+def to_entity(model: DesignModel) -> Design:
+    # Ensure design_data is dict (not string)
+    design_data = model.design_data
+    if isinstance(design_data, str):
+        design_data = json.loads(design_data)
+    
+    return Design(design_data=design_data, ...)
+```
+
+#### Issue #2: Repository Error Handling
+**Problema:** `scalar_one()` lanza NoResultFound si no existe
+**Solución:** Cambiado a `scalar_one_or_none()` + ValueError en métodos `update()`:
+```python
+async def update(self, user: User) -> User:
+    stmt = select(UserModel).where(UserModel.id == user.id)
+    result = await self.session.execute(stmt)
+    model = result.scalar_one_or_none()
+    
+    if model is None:
+        raise ValueError(f"User with id {user.id} not found")
+    
+    model = user_converter.to_model(user, model)
+    await self.session.flush()
+    await self.session.refresh(model)
+    return user_converter.to_entity(model)
+```
+
+**Archivos modificados:**
+- `app/infrastructure/database/converters/design_converter.py`
+- `app/infrastructure/database/repositories/user_repo_impl.py`
+- `app/infrastructure/database/repositories/subscription_repo_impl.py`
+- `app/infrastructure/database/repositories/design_repo_impl.py`
+
+**Tests ejecutados:**
+```bash
+docker-compose exec api python scripts/test_repositories.py
+✅ ALL REPOSITORY TESTS PASSED! (18/18)
+```
+
+### 🧪 Testing Infrastructure
+
+#### Pytest Setup (Configurado)
+**Archivos creados:**
+```
+tests/
+├── __init__.py
+├── conftest.py                    # Fixtures y configuración
+├── integration/
+│   ├── __init__.py
+│   └── test_repositories.py       # Tests básicos
+└── pytest.ini                      # Configuración pytest
+```
+
+**Nota:** Tests con pytest tienen conflicto con event loops asyncio. El script directo `scripts/test_repositories.py` funciona perfectamente y es la solución recomendada para este proyecto.
+
+### �🔗 Referencias
 - Clean Architecture: `ARQUITECTURA.md`
 - Repository Pattern: Domain interfaces + Infrastructure implementations
 - SQLAlchemy 2.0: Async patterns con `select()`, `update()`, `delete()`
@@ -255,8 +318,8 @@ await session.refresh(model)
 
 ---
 
-**Session Duration:** ~2 horas
-**Status:** ✅ Repository Pattern completamente implementado y validado
+**Session Duration:** ~3 horas
+**Status:** ✅ Repository Pattern completamente implementado, validado y corregido
 **Next Focus:** Implementar Use Cases (Application Layer)
 
 ---

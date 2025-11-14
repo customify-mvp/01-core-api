@@ -117,11 +117,14 @@ class DesignRepositoryImpl(IDesignRepository):
             Updated design entity
             
         Raises:
-            NoResultFound: If design not found
+            ValueError: If design not found
         """
         stmt = select(DesignModel).where(DesignModel.id == design.id)
         result = await self.session.execute(stmt)
-        model = result.scalar_one()  # Raises NoResultFound if not exists
+        model = result.scalar_one_or_none()
+        
+        if model is None:
+            raise ValueError(f"Design with id {design.id} not found")
         
         # Update model with entity data
         model = design_converter.to_model(design, model)

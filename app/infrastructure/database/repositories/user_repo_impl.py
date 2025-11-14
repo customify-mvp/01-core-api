@@ -97,11 +97,14 @@ class UserRepositoryImpl(IUserRepository):
             Updated user entity
             
         Raises:
-            NoResultFound: If user not found
+            ValueError: If user not found
         """
         stmt = select(UserModel).where(UserModel.id == user.id)
         result = await self.session.execute(stmt)
-        model = result.scalar_one()  # Raises NoResultFound if not exists
+        model = result.scalar_one_or_none()
+        
+        if model is None:
+            raise ValueError(f"User with id {user.id} not found")
         
         # Update model with entity data
         model = user_converter.to_model(user, model)
