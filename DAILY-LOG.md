@@ -1,5 +1,345 @@
 # Daily Development Log - Customify Core API
 
+## 2025-11-14 - Session 5: Automated Testing Suite (pytest) Implementado ✅
+
+### 🎯 Objetivos de la Sesión
+- [x] Configurar pytest con coverage, markers y async support
+- [x] Crear fixtures compartidos (test database, HTTP client, auth)
+- [x] Implementar Unit Tests para Domain Entities (User, Design, Subscription)
+- [x] Implementar Integration Tests para API Endpoints (Auth, Designs)
+- [x] Implementar Integration Tests para Repositories
+- [x] Alcanzar >70% code coverage
+- [x] Validar todos los tests pasando en Docker
+
+### 📊 Resultados Finales
+- ✅ **51 tests ejecutados** - 100% PASSED
+- ✅ **Coverage: 74.30%** - Supera el objetivo del 70%
+- ✅ **Test Pyramid:** 53% unit tests, 47% integration tests
+- ✅ **Tiempo de ejecución:** ~12 segundos
+
+### 🏗️ Trabajo Realizado
+
+#### 1. Configuración de pytest
+**Archivo creado:**
+- `pytest.ini` - Configuración principal de pytest
+
+```ini
+[pytest]
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+asyncio_mode = auto
+addopts = 
+    -v
+    --strict-markers
+    --cov=app
+    --cov-report=html
+    --cov-report=term-missing
+    --cov-fail-under=60
+markers =
+    unit: Unit tests (fast, no DB)
+    integration: Integration tests (with DB)
+    e2e: End-to-end tests
+```
+
+**Características:**
+- ✅ Coverage con HTML report (htmlcov/)
+- ✅ Markers para filtrar tests (@pytest.mark.unit, @pytest.mark.integration)
+- ✅ Async support con pytest-asyncio
+- ✅ Strict markers para evitar typos
+- ✅ Verbose output por defecto
+
+#### 2. Fixtures Compartidos (conftest.py)
+**Archivo creado:**
+- `tests/conftest.py` - Shared fixtures
+
+**Fixtures implementados:**
+```python
+@pytest.fixture(scope="function")
+async def test_engine():
+    """Create test database engine for each test."""
+    # Creates customify_test database
+    # Creates all tables with Base.metadata.create_all()
+    # Yields engine
+    # Cleanup: drops all tables
+
+@pytest.fixture
+async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+    """Create test database session."""
+    # Creates async session
+    # Yields session
+    # Rollback after test
+
+@pytest.fixture
+async def client(db_session) -> AsyncGenerator[AsyncClient, None]:
+    """Create test HTTP client."""
+    # Overrides get_db_session dependency
+    # Creates AsyncClient with ASGITransport
+    # Yields client
+    # Clears overrides
+
+@pytest.fixture
+def test_user_data():
+    """Test user data."""
+    return {
+        "email": "test@test.com",
+        "password": "Test1234",
+        "full_name": "Test User"
+    }
+```
+
+**Configuración:**
+- Database URL: `postgresql+asyncpg://customify:customify123@customify-postgres:5432/customify_test`
+- Scope: function (aislamiento completo entre tests)
+- Dependency override para FastAPI
+- AsyncClient con ASGITransport para testing sin servidor real
+
+#### 3. Unit Tests - Domain Entities
+
+**Estructura creada:**
+```
+tests/unit/domain/
+├── __init__.py
+├── test_user_entity.py           # 6 tests ✅
+├── test_design_entity.py         # 9 tests ✅
+└── test_subscription_entity.py   # 12 tests ✅
+```
+
+**test_user_entity.py (6 tests):**
+- `test_user_create()` - Factory method con defaults
+- `test_user_mark_login()` - last_login timestamp update
+- `test_user_update_profile()` - full_name y avatar_url
+- `test_user_deactivate()` - Soft delete (is_active=False, is_deleted=True)
+- `test_user_verify()` - verify_email() marca is_verified=True
+- `test_user_created_at_is_set()` - Timestamp validation
+
+**test_design_entity.py (9 tests):**
+- `test_design_create()` - Factory method con DesignStatus.DRAFT
+- `test_design_validate_success()` - Validación de datos completos
+- `test_design_validate_missing_text()` - ValueError cuando falta text
+- `test_design_validate_empty_text()` - ValueError para texto vacío
+- `test_design_validate_invalid_font()` - ValueError para font no permitida
+- `test_design_validate_invalid_color_format()` - ValueError para color inválido
+- `test_design_mark_published()` - Cambio de estado DRAFT→RENDERING→PUBLISHED
+- `test_design_mark_failed()` - Cambio de estado con error_message
+- `test_design_update_data()` - Actualización de design_data
+
+**test_subscription_entity.py (12 tests):**
+- `test_subscription_create()` - Factory con PlanType.FREE, status.ACTIVE
+- `test_subscription_is_active_true()` - Verificación de estado activo
+- `test_subscription_is_active_false_when_canceled()` - Estado cancelado
+- `test_subscription_can_create_design_free_plan_within_quota()` - 5/10 designs = True
+- `test_subscription_can_create_design_free_plan_quota_exceeded()` - 10/10 = False
+- `test_subscription_can_create_design_professional_plan_within_quota()` - 50/1000 = True
+- `test_subscription_can_create_design_enterprise_unlimited()` - Unlimited = True
+- `test_subscription_can_create_design_inactive_subscription()` - Canceled check
+- `test_subscription_increment_usage()` - Counter 0→1→2
+- `test_subscription_cancel()` - Status change a CANCELED
+- `test_subscription_upgrade_plan()` - FREE→PROFESSIONAL
+- `test_subscription_monthly_limits()` - Validación de PLAN_LIMITS
+
+**Características:**
+- ✅ Tests rápidos (sin DB)
+- ✅ Pure business logic testing
+- ✅ Validación de factory methods
+- ✅ Validación de business rules
+- ✅ Validación de state transitions
+- ✅ Uso de pytest.raises para excepciones
+
+#### 4. Integration Tests - API Endpoints
+
+**Estructura creada:**
+```
+tests/integration/api/
+├── __init__.py
+├── test_auth_endpoints.py     # 10 tests ✅
+└── test_design_endpoints.py   # 10 tests ✅
+```
+
+**test_auth_endpoints.py (10 tests):**
+- `test_register_success()` - POST /api/v1/auth/register → 201
+- `test_register_duplicate_email()` - Duplicate → 409 Conflict
+- `test_register_invalid_password()` - Short password → 422 Validation
+- `test_login_success()` - POST /api/v1/auth/login → 200 + JWT
+- `test_login_invalid_credentials()` - Wrong password → 401 Unauthorized
+- `test_login_case_insensitive_email()` - Email normalization
+- `test_get_me_authenticated()` - GET /api/v1/auth/me → 200 + user profile
+- `test_get_me_unauthenticated()` - No token → 403 Forbidden
+- `test_get_me_invalid_token()` - Invalid JWT → 401 Unauthorized
+- `test_health_check()` - GET /api/v1/health → 200 + database status
+
+**test_design_endpoints.py (10 tests):**
+- `test_create_design_success()` - POST /api/v1/designs → 201
+- `test_create_design_unauthenticated()` - No token → 403
+- `test_create_design_whitespace_text()` - Empty text → 422
+- `test_create_design_invalid_color()` - "red" instead of "#FF0000" → 422
+- `test_list_designs()` - GET /api/v1/designs → Pagination response
+- `test_list_designs_pagination()` - skip/limit parameters
+- `test_get_design_by_id()` - GET /api/v1/designs/{id} → 200
+- `test_get_design_not_found()` - Non-existent ID → 404
+- `test_list_designs_unauthenticated()` - No token → 403
+- `test_get_design_unauthenticated()` - No token → 403
+
+**Características:**
+- ✅ Real HTTP requests con AsyncClient
+- ✅ Database transactions con rollback
+- ✅ JWT authentication testing
+- ✅ Validation error testing
+- ✅ Pagination testing
+- ✅ Status code assertions
+- ✅ Response body validation
+
+#### 5. Integration Tests - Repositories
+
+**Archivo creado:**
+- `tests/integration/test_repositories.py` (4 tests)
+
+**Tests implementados:**
+- `test_user_repository_create()` - Create user + subscription
+- `test_user_repository_get_by_email()` - Fetch by email
+- `test_user_repository_update()` - Update full_name
+- `test_user_repository_exists_email()` - Check email existence
+
+**Características:**
+- ✅ SQLAlchemy async operations
+- ✅ Entity-to-Model conversion testing
+- ✅ Database constraints validation
+
+#### 6. Coverage Report
+
+**Coverage por Módulos:**
+```
+Module                                           Stmts   Miss  Cover
+--------------------------------------------------------------------
+app/domain/entities/user.py                        53     12    77%
+app/domain/entities/design.py                     117     28    76%
+app/domain/entities/subscription.py                91     38    58%
+app/infrastructure/database/models/user_model.py   24      1    96%
+app/infrastructure/repositories/user_repo_impl.py  45      7    84%
+app/presentation/endpoints/auth.py                 24      2    92%
+app/presentation/endpoints/designs.py              28      8    71%
+app/shared/services/jwt_service.py                 18      1    94%
+app/shared/services/password_service.py             8      1    88%
+app/converters/user_converter.py                   19      0   100%
+app/converters/subscription_converter.py           19      0   100%
+--------------------------------------------------------------------
+TOTAL                                            1210    311    74%
+```
+
+**Módulos con 100% coverage:**
+- ✅ All converters (user, subscription)
+- ✅ All schemas (auth, design)
+- ✅ All exceptions
+- ✅ All repositories interfaces
+- ✅ All __init__.py exports
+
+**Áreas con coverage bajo (<60%):**
+- ⚠️ Use cases: 50-63% (paths de error no testeados)
+- ⚠️ Middleware: 0% (exception handler no ejecutado en tests)
+- ⚠️ get_user_profile: 0% (endpoint no testeado)
+
+### 🔧 Comandos Útiles
+
+**Ejecutar todos los tests:**
+```bash
+docker-compose exec api pytest
+```
+
+**Solo tests unitarios (rápidos):**
+```bash
+docker-compose exec api pytest -m unit
+```
+
+**Solo tests de integración:**
+```bash
+docker-compose exec api pytest -m integration
+```
+
+**Con coverage HTML:**
+```bash
+docker-compose exec api pytest --cov-report=html
+# Ver reporte: htmlcov/index.html
+```
+
+**Tests específicos:**
+```bash
+docker-compose exec api pytest tests/unit/domain/test_user_entity.py -v
+docker-compose exec api pytest tests/integration/api/test_auth_endpoints.py::test_login_success -v
+```
+
+**Sin warnings:**
+```bash
+docker-compose exec api pytest --disable-warnings
+```
+
+**Stop on first failure:**
+```bash
+docker-compose exec api pytest -x
+```
+
+### 📦 Dependencias Agregadas (ya existían en requirements.txt)
+```
+pytest==7.4.0
+pytest-asyncio==0.23.0
+pytest-cov==4.1.0
+httpx==0.26.0
+```
+
+### ✅ Validaciones Completadas
+1. ✅ Test database creada (customify_test)
+2. ✅ Todos los tests pasan (51/51)
+3. ✅ Coverage >70% alcanzado (74.30%)
+4. ✅ Fixtures de auth funcionando
+5. ✅ Async tests ejecutándose correctamente
+6. ✅ Database isolation entre tests
+7. ✅ HTML coverage report generado
+
+### 🐛 Issues Corregidos Durante Testing
+1. **Event loop closed error:**
+   - Problema: pytest-asyncio con session-scoped fixtures
+   - Solución: Cambiar test_engine a function scope
+
+2. **Database connection error:**
+   - Problema: localhost en lugar de customify-postgres
+   - Solución: Usar hostname correcto en TEST_DATABASE_URL
+
+3. **Entity method mismatches:**
+   - Tests asumían métodos que no existían
+   - Solución: Actualizar tests para usar métodos reales de entities
+   - Ejemplos: `verify()` → `verify_email()`, `plan_type` → `plan`
+
+4. **Quota test con atributo inexistente:**
+   - Test usaba `subscription.designs_limit` (no existe)
+   - Solución: Test eliminado (quota ya cubierta en unit tests)
+
+### 📊 Test Pyramid Lograda
+```
+    /\
+   /  \  E2E (0 tests) - 0%
+  /____\
+ /      \  Integration (24 tests) - 47%
+/________\
+/          \  Unit (27 tests) - 53%
+/____________\
+```
+
+### 🎯 Próximos Pasos Recomendados
+1. Aumentar coverage de Use Cases (agregar tests para error paths)
+2. Agregar E2E tests (user registration → design creation → rendering)
+3. Agregar performance tests (load testing con locust)
+4. Configurar CI/CD para ejecutar tests automáticamente
+5. Agregar mutation testing (mutpy/cosmic-ray)
+
+### 📝 Notas Técnicas
+- Todos los tests usan `@pytest.mark.unit` o `@pytest.mark.integration`
+- Las fixtures de DB hacen rollback automático
+- AsyncClient usa ASGITransport (no levanta servidor real)
+- Test database se crea/destruye por cada test (isolación completa)
+- JWT tokens generados en fixtures con 7 días de expiración
+
+---
+
 ## 2025-11-14 - Session 4: API Endpoints (Presentation Layer) Implementados ✅
 
 ### 🎯 Objetivos de la Sesión
