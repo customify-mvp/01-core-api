@@ -32,6 +32,9 @@ celery_app.conf.update(
     result_expires=86400,  # Results expire after 24 hours
     result_extended=True,
     
+    # Broker connection
+    broker_connection_retry_on_startup=True,  # Fix deprecation warning
+    
     # Task routing (queues)
     task_routes={
         "app.infrastructure.workers.tasks.render_design.*": {"queue": "high_priority"},

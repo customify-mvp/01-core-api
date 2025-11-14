@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = Field(default="")
     AWS_SECRET_ACCESS_KEY: str = Field(default="")
     S3_BUCKET_NAME: str = "customify-production"
+    S3_PUBLIC_BUCKET: bool = True  # If False, use signed URLs
+    
+    # CloudFront (optional)
+    CLOUDFRONT_DOMAIN: str = Field(default="")  # e.g., "d123.cloudfront.net"
+    
+    # Storage
+    USE_LOCAL_STORAGE: bool = Field(default=True)  # True for dev, False for prod
     
     # OpenAI
     OPENAI_API_KEY: str = Field(default="")
@@ -114,6 +121,21 @@ class Settings(BaseSettings):
         if not url.startswith("db+"):
             url = "db+" + url
         return url
+    
+    @property
+    def s3_base_url(self) -> str:
+        """
+        Get base URL for S3 objects.
+        
+        Returns CloudFront URL if configured, otherwise S3 direct URL.
+        
+        Returns:
+            str: Base URL for S3 objects
+        """
+        if self.CLOUDFRONT_DOMAIN:
+            return f"https://{self.CLOUDFRONT_DOMAIN}"
+        
+        return f"https://{self.S3_BUCKET_NAME}.s3.{self.AWS_REGION}.amazonaws.com"
     
     # Encryption (Fernet key for token encryption)
     ENCRYPTION_KEY: str = Field(default="")
