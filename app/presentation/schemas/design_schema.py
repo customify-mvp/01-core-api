@@ -8,7 +8,9 @@ from datetime import datetime
 class DesignDataSchema(BaseModel):
     """Design data (nested in DesignCreateRequest)."""
     
-    text: str = Field(min_length=1, max_length=100)
+    # Use maximum length across all validators (PosterValidator = 200)
+    # Specific limits enforced by domain validators
+    text: str = Field(min_length=1, max_length=200)
     font: Literal['Bebas-Bold', 'Montserrat-Regular', 'Montserrat-Bold', 
                   'Pacifico-Regular', 'Roboto-Regular']
     color: str = Field(pattern=r'^#[0-9A-Fa-f]{6}$')
