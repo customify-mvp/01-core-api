@@ -98,15 +98,12 @@ async def list_designs(
     Raises:
         401: Invalid/expired token
     """
-    # Get designs (without filters param)
-    designs = await design_repo.get_by_user(
+    # Get designs with total count (optimized, no N+1)
+    designs, total = await design_repo.get_by_user(
         user_id=current_user.id,
         skip=skip,
         limit=limit
     )
-    
-    # Get total count
-    total = await design_repo.count_by_user(current_user.id)
     
     return DesignListResponse(
         designs=[DesignResponse.model_validate(d) for d in designs],

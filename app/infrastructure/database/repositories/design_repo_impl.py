@@ -4,9 +4,10 @@ Design repository implementation (Infrastructure layer).
 Implements IDesignRepository using SQLAlchemy 2.0 async.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.entities.design import Design, DesignStatus
 from app.domain.repositories.design_repository import IDesignRepository
@@ -70,9 +71,9 @@ class DesignRepositoryImpl(IDesignRepository):
         skip: int = 0,
         limit: int = 100,
         status: Optional[DesignStatus] = None
-    ) -> List[Design]:
+    ) -> Tuple[List[Design], int]:
         """
-        Get user's designs with pagination.
+        Get user's designs with pagination (optimized, no N+1).
         
         Args:
             user_id: User unique identifier
@@ -81,12 +82,19 @@ class DesignRepositoryImpl(IDesignRepository):
             status: Filter by design status (optional)
             
         Returns:
-            List of design entities
+            Tuple of (list of design entities, total count)
         """
-        # Build base query
-        stmt = select(DesignModel).where(
-            DesignModel.user_id == user_id,
-            DesignModel.is_deleted == False
+        # Build base query with eager loading to prevent N+1
+        stmt = (
+            select(DesignModel)
+            .options(
+                selectinload(DesignModel.user),  # Eager load relationships
+                # selectinload(DesignModel.orders) if needed
+            )
+            .where(
+                DesignModel.user_id == user_id,
+                DesignModel.is_deleted == False
+            )
         )
         
         # Add status filter if provided
@@ -104,7 +112,24 @@ class DesignRepositoryImpl(IDesignRepository):
         result = await self.session.execute(stmt)
         models = result.scalars().all()
         
-        return [design_converter.to_entity(model) for model in models]
+        # Separate count query for performance
+        count_stmt = (
+            select(func.count(DesignModel.id))
+            .where(
+                DesignModel.user_id == user_id,
+                DesignModel.is_deleted == False
+            )
+        )
+        
+        if status is not None:
+            count_stmt = count_stmt.where(DesignModel.status == status.value)
+        
+        count_result = await self.session.execute(count_stmt)
+        total = count_result.scalar()
+        
+        designs = [design_converter.to_entity(model) for model in models]
+        
+        return designs, total
     
     async def update(self, design: Design) -> Design:
         """

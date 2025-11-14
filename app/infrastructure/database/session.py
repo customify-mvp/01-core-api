@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import QueuePool
 
 from app.config import settings
 
@@ -22,14 +22,22 @@ class Base(DeclarativeBase):
     pass
 
 
-# Create async engine
+# Create async engine with optimized pooling
 engine = create_async_engine(
     str(settings.DATABASE_URL),
     echo=settings.DEBUG,  # Log SQL queries in debug mode
+    poolclass=QueuePool,  # Explicitly use QueuePool (default for non-SQLite)
     pool_size=20,  # Max connections in pool
     max_overflow=10,  # Max extra connections when pool exhausted
-    pool_pre_ping=True,  # Verify connection before using
-    pool_recycle=3600,  # Recycle connections after 1 hour
+    pool_pre_ping=True,  # Verify connection before using (catches stale connections)
+    pool_recycle=3600,  # Recycle connections after 1 hour (prevents stale connections)
+    pool_timeout=30,  # Wait 30s for connection from pool before error
+    pool_reset_on_return='rollback',  # Reset connection state on return to pool
+    connect_args={
+        "server_settings": {"jit": "off"},  # Disable JIT compilation for faster connections
+        "command_timeout": 60,  # Query timeout (60 seconds)
+        "prepared_statement_cache_size": 500,  # Cache prepared statements for performance
+    } if 'postgresql' in str(settings.DATABASE_URL) else {},
     # Use NullPool for serverless (AWS Lambda) - uncomment if needed
     # poolclass=NullPool,
 )

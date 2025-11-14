@@ -106,62 +106,20 @@ class Design:
     
     def validate(self) -> None:
         """
-        Validate design business rules.
+        Validate design business rules using Strategy Pattern.
+        
+        Delegates validation to product-specific validator.
         
         Raises:
             ValueError: If any validation rule fails
         """
-        # Rule 1: Check required fields exist
-        required_fields = ['text', 'font', 'color']
-        for field in required_fields:
-            if field not in self.design_data:
-                raise ValueError(f"Missing required field: {field}")
+        from app.domain.validators.design_validator import get_validator
         
-        # Rule 2: Text validation
-        text = self.design_data.get("text", "")
+        # Get appropriate validator for this product type
+        validator = get_validator(self.product_type)
         
-        # Text must not be empty
-        if not text or not text.strip():
-            raise ValueError("Text cannot be empty")
-        
-        # Text must not exceed 100 characters
-        if len(text) > 100:
-            raise ValueError(f"Text too long (max 100 chars): {len(text)}")
-        
-        # Rule 3: Color validation - must be valid hex format (#RRGGBB)
-        color = self.design_data.get("color", "")
-        if not color.startswith('#') or len(color) != 7:
-            raise ValueError(f"Invalid color format (expected #RRGGBB): {color}")
-        
-        # Verify it's valid hex
-        if not re.match(r'^#[0-9A-Fa-f]{6}$', color):
-            raise ValueError(f"Invalid hex color: {color}")
-        
-        # Rule 4: Font validation - must be in allowed list
-        allowed_fonts = [
-            'Bebas-Bold', 
-            'Montserrat-Regular', 
-            'Montserrat-Bold',
-            'Pacifico-Regular', 
-            'Roboto-Regular'
-        ]
-        font = self.design_data.get("font", "")
-        
-        if not font or not font.strip():
-            raise ValueError("Font cannot be empty")
-        
-        if font not in allowed_fonts:
-            raise ValueError(
-                f"Invalid font: {font}. Allowed fonts: {', '.join(allowed_fonts)}"
-            )
-        
-        # Rule 5: If fontSize provided, must be between 8 and 144
-        if "fontSize" in self.design_data:
-            font_size = self.design_data["fontSize"]
-            if not isinstance(font_size, (int, float)):
-                raise ValueError(f"fontSize must be a number, got {type(font_size).__name__}")
-            if font_size < 8 or font_size > 144:
-                raise ValueError(f"fontSize must be between 8 and 144, got {font_size}")
+        # Delegate validation to strategy
+        validator.validate(self.design_data, self.product_type)
     
     def mark_rendering(self) -> None:
         """

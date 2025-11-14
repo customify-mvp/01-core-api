@@ -5,7 +5,7 @@ Defines contract for design persistence operations.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from app.domain.entities.design import Design, DesignStatus
 
 
@@ -49,9 +49,9 @@ class IDesignRepository(ABC):
         skip: int = 0,
         limit: int = 100,
         status: Optional[DesignStatus] = None
-    ) -> List[Design]:
+    ) -> Tuple[List[Design], int]:
         """
-        Get user's designs with pagination.
+        Get user's designs with pagination and count.
         
         Args:
             user_id: User unique identifier
@@ -60,7 +60,7 @@ class IDesignRepository(ABC):
             status: Filter by design status (optional)
             
         Returns:
-            List of design entities
+            Tuple of (list of designs, total count)
         """
         pass
     

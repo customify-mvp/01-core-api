@@ -15,6 +15,7 @@ import os
 
 from app.config import settings
 from app.presentation.api.v1.router import api_router
+from app.presentation.middleware import SecurityHeadersMiddleware
 from app.infrastructure.database.session import close_db, get_db_session
 
 # Import all domain exceptions for handler registration
@@ -80,15 +81,28 @@ app = FastAPI(
 )
 
 # ============================================================
-# CORS Middleware
+# CORS Middleware (Security-hardened)
 # ============================================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],  # Explicit methods only
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "X-Request-ID",
+        "Accept-Language",
+    ],  # Specific headers only
+    expose_headers=["X-Request-ID"],  # Headers clients can access
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+# ============================================================
+# Security Headers Middleware
+# ============================================================
+app.add_middleware(SecurityHeadersMiddleware)
 
 # ============================================================
 # Static Files (for local development)
