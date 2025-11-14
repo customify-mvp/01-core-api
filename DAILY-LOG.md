@@ -9,6 +9,11 @@
 - [x] Implementar Use Cases de Usuario
 - [x] Implementar Use Cases de Diseño
 - [x] Validar imports y funcionamiento
+- [x] Agregar validación de contraseñas (Issue #5)
+- [x] Implementar normalización de emails (Issue #6)
+- [x] Verificar estructura de packages (Issue #7)
+- [x] Crear tests de integración end-to-end
+- [x] Validar flujo completo Register → Login → Create Design
 
 ### 🏗️ Trabajo Realizado
 
@@ -164,25 +169,46 @@ async def execute(
 
 ✅ docker-compose exec api python -c "from app.shared.services import hash_password, verify_password, create_access_token, decode_access_token..."
    → All services import OK from package
+
+✅ docker-compose exec api python scripts/test_entity_fixes.py
+   → 6/6 entity tests passed (Subscription.is_active(), Design.validate())
+
+✅ docker-compose exec api python scripts/test_password_validation.py
+   → 7/7 password validation tests passed
+   → Password validation rules: min 8 chars, max 100, at least 1 letter, 1 number
+   → Email normalization working: "Test@Example.COM  " → "test@example.com"
+
+✅ docker-compose exec api python scripts/test_integration_flow.py
+   → Complete end-to-end integration test passed:
+   → Register → Login → Create Design → Validate → Track Quota
+   → 7/7 integration scenarios passed
 ```
 
 ### 📊 Métricas
 
-**Archivos creados en esta sesión:** 13
+**Archivos creados en esta sesión:** 19
 - 3 archivos de excepciones (auth, design, subscription)
 - 1 JWT service
 - 2 use cases de autenticación (register, login)
 - 1 use case de usuario (get profile)
 - 1 use case de diseño (create)
 - 5 archivos __init__.py para packages
+- 3 scripts de testing (entity fixes, password validation, integration)
+- 2 archivos de documentación (.Project Knowledge/)
+- 1 actualización de DAILY-LOG.md
 
-**Líneas de código:** ~600+
+**Líneas de código:** ~900+
 
 **Use Cases implementados:** 4
-- RegisterUserUseCase
-- LoginUserUseCase
+- RegisterUserUseCase (con validación de contraseñas)
+- LoginUserUseCase (con normalización de emails)
 - GetUserProfileUseCase
 - CreateDesignUseCase
+
+**Tests ejecutados:** 20+
+- 6 tests de entidades (is_active, validate)
+- 7 tests de validación de contraseñas
+- 7 tests de integración end-to-end
 
 ### 📝 Notas Técnicas
 
@@ -229,6 +255,38 @@ class LoginUserUseCase:
         self.user_repo = user_repo
 ```
 
+#### Password Validation Rules
+```python
+def _validate_password(self, password: str) -> None:
+    """
+    Valida fortaleza de contraseña.
+    
+    Rules:
+    - Mínimo 8 caracteres
+    - Máximo 100 caracteres
+    - Al menos 1 letra
+    - Al menos 1 número
+    """
+    if len(password) < 8:
+        raise InvalidCredentialsError("Password must be at least 8 characters long")
+    if len(password) > 100:
+        raise InvalidCredentialsError("Password cannot be longer than 100 characters")
+    if not any(c.isalpha() for c in password):
+        raise InvalidCredentialsError("Password must contain at least one letter")
+    if not any(c.isdigit() for c in password):
+        raise InvalidCredentialsError("Password must contain at least one number")
+```
+
+#### Email Normalization
+```python
+# En RegisterUserUseCase y LoginUserUseCase
+async def execute(self, email: str, password: str, ...) -> ...:
+    # Normalize email for case-insensitive matching
+    email = email.lower().strip()
+    
+    # Continue with business logic...
+```
+
 ### 🐛 Problemas Resueltos
 
 #### Issue #1: Import Error de Enums
@@ -243,11 +301,121 @@ from app.domain.value_objects.enums import SubscriptionPlan
 from app.domain.entities.subscription import PlanType
 ```
 
-#### Issue #2: Bcrypt Warning
+#### Issue #2: Subscription.is_active() Method Missing
+**Error:** `AttributeError: 'Subscription' object has no attribute 'is_active'`
+**Causa:** CreateDesignUseCase llamaba método que no existía en la entidad
+**Solución:** Agregado método a `app/domain/entities/subscription.py`:
+```python
+def is_active(self) -> bool:
+    """Check if subscription is currently active."""
+    return self.status == SubscriptionStatus.ACTIVE
+```
+
+#### Issue #3: Design.validate() Method Incomplete
+**Error:** Método validate() no tenía lógica de validación
+**Causa:** Implementación incompleta de la entidad Design
+**Solución:** Mejorado método en `app/domain/entities/design.py`:
+```python
+def validate(self) -> None:
+    """Validate design data."""
+    # Required fields
+    if not self.text:
+        raise ValueError("Design text is required")
+    if not self.font:
+        raise ValueError("Design font is required")
+    if not self.color:
+        raise ValueError("Design color is required")
+    
+    # Font whitelist
+    ALLOWED_FONTS = [
+        "Bebas-Bold", "Montserrat-Regular", "Montserrat-Bold",
+        "Pacifico-Regular", "Roboto-Regular"
+    ]
+    if self.font not in ALLOWED_FONTS:
+        raise ValueError(f"Font '{self.font}' not allowed")
+    
+    # Hex color validation
+    import re
+    if not re.match(r'^#[0-9A-Fa-f]{6}$', self.color):
+        raise ValueError(f"Invalid hex color: {self.color}")
+```
+
+#### Issue #5: Password Validation Missing
+**Problema:** RegisterUserUseCase no validaba fortaleza de contraseñas
+**Solución:** Agregado método privado `_validate_password()`:
+- Mínimo 8 caracteres
+- Máximo 100 caracteres
+- Al menos 1 letra
+- Al menos 1 número
+
+#### Issue #6: Email Normalization Missing
+**Problema:** Login fallaba con emails en mayúsculas/espacios
+**Solución:** Agregado `email = email.lower().strip()` en:
+- RegisterUserUseCase.execute()
+- LoginUserUseCase.execute()
+
+#### Issue #7: Package Structure
+**Verificación:** Todos los `__init__.py` existen y exportan correctamente:
+- ✅ `app/application/__init__.py`
+- ✅ `app/application/use_cases/__init__.py`
+- ✅ `app/application/use_cases/auth/__init__.py`
+- ✅ `app/application/use_cases/users/__init__.py`
+- ✅ `app/application/use_cases/designs/__init__.py`
+
+#### Issue #8: Bcrypt Warning
 **Warning:** `(trapped) error reading bcrypt version`
 **Causa:** Incompatibilidad menor entre versiones de bcrypt y passlib
 **Impacto:** ⚠️ Warning ignorable - La funcionalidad funciona correctamente
 **Nota:** No afecta el hashing/verificación de passwords
+
+### 🧪 Testing Infrastructure
+
+#### Test Scripts Creados
+**1. scripts/test_entity_fixes.py**
+- Tests para Subscription.is_active()
+- Tests para Design.validate()
+- 6/6 tests passing
+
+**2. scripts/test_password_validation.py**
+- Tests para validación de contraseñas (min/max length, letter, number)
+- Tests para normalización de emails
+- 7/7 tests passing
+
+**3. scripts/test_integration_flow.py**
+- Test end-to-end completo: Register → Login → Create Design
+- 7 escenarios validados:
+  1. ✅ Registro de usuario con subscription automática
+  2. ✅ Validación de contraseña débil rechazada
+  3. ✅ Login exitoso con generación de JWT
+  4. ✅ Login case-insensitive (email normalizado)
+  5. ✅ Creación de diseño con tracking de quota
+  6. ✅ Validación de fuente inválida rechazada
+  7. ✅ Verificación de conteo de diseños
+
+**Resultado SQLAlchemy Queries:**
+```sql
+-- User Registration
+INSERT INTO users (id, email, full_name, password_hash, is_active, ...)
+VALUES ('b33ebee8-...', 'flow_test@test.com', 'Flow Test User', ...)
+
+INSERT INTO subscriptions (id, user_id, plan_type, status, designs_this_month, ...)
+VALUES ('...', 'b33ebee8-...', 'FREE', 'ACTIVE', 0, ...)
+
+-- Login (Case Insensitive)
+SELECT * FROM users WHERE email = 'flow_test@test.com' AND is_deleted = false
+
+UPDATE users SET last_login = '2025-11-14 16:34:13.219737' WHERE id = 'b33ebee8-...'
+
+-- Design Creation
+INSERT INTO designs (id, user_id, product_type, design_data, status, ...)
+VALUES ('ef5cf22a-...', 'b33ebee8-...', 't-shirt', {...}, 'draft', ...)
+
+UPDATE subscriptions SET designs_this_month = 1 WHERE id = '...'
+
+-- Verification Queries
+SELECT COUNT(*) FROM designs WHERE user_id = 'b33ebee8-...' AND is_deleted = false
+-- Result: 1
+```
 
 ### 🎯 Siguiente Sesión - DTOs y API Endpoints
 
@@ -279,11 +447,19 @@ from app.domain.entities.subscription import PlanType
 - Domain Exceptions: Errores de negocio, NO HTTP exceptions
 - JWT: RFC 7519 - JSON Web Tokens
 - Dependency Injection: Constructor injection pattern
+- Password Validation: OWASP guidelines (min length, complexity)
+- Email Normalization: Case-insensitive, trim whitespace
+- Integration Testing: End-to-end flow validation
+
+### 📚 Documentación Creada
+- `.Project Knowledge/ENTITY_FIXES.md` - Documentación de fixes en entidades
+- `.Project Knowledge/USECASE_IMPROVEMENTS.md` - Documentación de mejoras en use cases
 
 ---
 
-**Session Duration:** ~1.5 horas
-**Status:** ✅ Use Cases (Application Layer) completos y validados
+**Session Duration:** ~4 horas
+**Status:** ✅ Use Cases (Application Layer) completos, validados y testeados
+**Tests Status:** 20/20 tests passing (entity fixes, password validation, integration)
 **Next Focus:** Implementar DTOs y API Endpoints (Presentation Layer)
 
 ---

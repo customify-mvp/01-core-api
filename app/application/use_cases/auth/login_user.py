@@ -41,24 +41,27 @@ class LoginUserUseCase:
             InvalidCredentialsError: Invalid email or password
             InactiveUserError: User account is inactive
         """
-        # 1. Get user by email
+        # 1. Normalize email
+        email = email.lower().strip()
+        
+        # 2. Get user by email
         user = await self.user_repo.get_by_email(email)
         if user is None:
             raise InvalidCredentialsError("Invalid email or password")
         
-        # 2. Verify password
+        # 3. Verify password
         if not verify_password(password, user.password_hash):
             raise InvalidCredentialsError("Invalid email or password")
         
-        # 3. Check user is active
+        # 4. Check user is active
         if not user.is_active or user.is_deleted:
             raise InactiveUserError("User account is inactive")
         
-        # 4. Update last_login
+        # 5. Update last_login
         user.mark_login()
         await self.user_repo.update(user)
         
-        # 5. Generate JWT token
+        # 6. Generate JWT token
         access_token = create_access_token(user.id)
         
         return user, access_token

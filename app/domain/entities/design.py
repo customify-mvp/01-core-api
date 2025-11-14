@@ -111,24 +111,49 @@ class Design:
         Raises:
             ValueError: If any validation rule fails
         """
-        # Rule 1: Text must not exceed 100 characters
-        text = self.design_data.get("text", "")
-        if len(text) > 100:
-            raise ValueError(f"Text too long: {len(text)} chars (max 100)")
+        # Rule 1: Check required fields exist
+        required_fields = ['text', 'font', 'color']
+        for field in required_fields:
+            if field not in self.design_data:
+                raise ValueError(f"Missing required field: {field}")
         
-        # Rule 2: Text must not be empty
+        # Rule 2: Text validation
+        text = self.design_data.get("text", "")
+        
+        # Text must not be empty
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
         
-        # Rule 3: Color must be valid hex format (#RRGGBB)
-        color = self.design_data.get("color", "")
-        if not re.match(r'^#[0-9A-Fa-f]{6}$', color):
-            raise ValueError(f"Invalid color format: {color} (expected #RRGGBB)")
+        # Text must not exceed 100 characters
+        if len(text) > 100:
+            raise ValueError(f"Text too long (max 100 chars): {len(text)}")
         
-        # Rule 4: Font must not be empty
+        # Rule 3: Color validation - must be valid hex format (#RRGGBB)
+        color = self.design_data.get("color", "")
+        if not color.startswith('#') or len(color) != 7:
+            raise ValueError(f"Invalid color format (expected #RRGGBB): {color}")
+        
+        # Verify it's valid hex
+        if not re.match(r'^#[0-9A-Fa-f]{6}$', color):
+            raise ValueError(f"Invalid hex color: {color}")
+        
+        # Rule 4: Font validation - must be in allowed list
+        allowed_fonts = [
+            'Bebas-Bold', 
+            'Montserrat-Regular', 
+            'Montserrat-Bold',
+            'Pacifico-Regular', 
+            'Roboto-Regular'
+        ]
         font = self.design_data.get("font", "")
+        
         if not font or not font.strip():
             raise ValueError("Font cannot be empty")
+        
+        if font not in allowed_fonts:
+            raise ValueError(
+                f"Invalid font: {font}. Allowed fonts: {', '.join(allowed_fonts)}"
+            )
         
         # Rule 5: If fontSize provided, must be between 8 and 144
         if "fontSize" in self.design_data:

@@ -105,6 +105,15 @@ class Subscription:
         
         return self.designs_this_month < limit
     
+    def is_active(self) -> bool:
+        """
+        Check if subscription is active.
+        
+        Returns:
+            True if subscription status is ACTIVE, False otherwise
+        """
+        return self.status == SubscriptionStatus.ACTIVE
+    
     def get_remaining_quota(self) -> int:
         """
         Get remaining design quota for this month.
