@@ -95,8 +95,7 @@ celery -A app.infrastructure.workers.celery_app worker \
     --loglevel=info \
     --concurrency=2 \
     --queues=high_priority,default \
-    --max-tasks-per-child=1000 \
-    --time-limit=300 \
-    --soft-time-limit=240
+    --pool=solo \
+    --hostname=worker@%h
 
 # Note: Press Ctrl+C to stop the worker

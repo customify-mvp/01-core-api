@@ -66,8 +66,6 @@ class SyncDesignRepository:
             raise ValueError(f"Design {design.id} not found")
         
         # Update model with entity data
-        model.name = design.name
-        model.description = design.description
         model.status = design.status.value
         model.preview_url = design.preview_url
         model.thumbnail_url = design.thumbnail_url

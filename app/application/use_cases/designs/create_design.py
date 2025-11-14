@@ -88,8 +88,16 @@ class CreateDesignUseCase:
         subscription.increment_usage()
         await self.subscription_repo.update(subscription)
         
-        # 8. Queue render job (Celery task)
-        from app.infrastructure.workers.tasks.render_design import render_design_preview
-        render_design_preview.delay(created_design.id)
-        
+        # 8. Queue render job (Celery task) with explicit queue
+        from app.infrastructure.workers.tasks.render_design import render_design_preview       
+        task = render_design_preview.apply_async(
+            args=[created_design.id],
+            queue='high_priority',  # ✅ Forzar queue explícita
+            routing_key='high_priority'
+        )
+
+        # Opcional: guardar task_id
+        created_design.render_task_id = task.id
+        await self.design_repo.update(created_design)
+
         return created_design
