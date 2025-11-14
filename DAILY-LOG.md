@@ -729,25 +729,261 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/me" -Method GET -Heade
    - Mockup generation
    - Background processing
 
-### 🔗 Referencias
+### � Correcciones Post-Implementación
+
+#### Issue #1: Exception Handlers - Loop Registration ❌→✅
+**Problema:** Loop-based registration no funcionaba correctamente
+```python
+# ❌ ANTES - No funcionaba
+for exc_type in exception_types:
+    app.add_exception_handler(exc_type, domain_exception_handler)
+```
+
+**Solución:** Individual handlers con HTTP status codes específicos
+```python
+# ✅ DESPUÉS - 10 handlers individuales
+@app.exception_handler(InvalidCredentialsError)
+async def invalid_credentials_handler(request: Request, exc: InvalidCredentialsError):
+    return JSONResponse(status_code=401, content={"detail": str(exc)})
+
+@app.exception_handler(EmailAlreadyExistsError)
+async def email_exists_handler(request: Request, exc: EmailAlreadyExistsError):
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+# ... otros 8 handlers
+```
+
+**Handlers implementados:**
+- `InvalidCredentialsError` → 401 Unauthorized
+- `EmailAlreadyExistsError` → 409 Conflict
+- `UserNotFoundError` → 404 Not Found
+- `InactiveUserError` → 403 Forbidden
+- `QuotaExceededError` → 402 Payment Required
+- `InactiveSubscriptionError` → 403 Forbidden
+- `DesignNotFoundError` → 404 Not Found
+- `UnauthorizedDesignAccessError` → 403 Forbidden
+- `ValueError` → 400 Bad Request
+- `Exception` → 500 Internal Server Error
+
+#### Issue #2: Missing __init__.py Exports ✅
+**Agregados exports claros:**
+
+**app/presentation/schemas/__init__.py:**
+```python
+from app.presentation.schemas.auth_schema import (
+    RegisterRequest, LoginRequest, UserResponse, LoginResponse,
+)
+from app.presentation.schemas.design_schema import (
+    DesignDataSchema, DesignCreateRequest, DesignResponse, DesignListResponse,
+)
+
+__all__ = ["RegisterRequest", "LoginRequest", ...]
+```
+
+**app/presentation/dependencies/__init__.py:**
+```python
+from app.presentation.dependencies.auth import get_current_user
+from app.presentation.dependencies.repositories import (
+    get_user_repository, get_subscription_repository, get_design_repository,
+)
+
+__all__ = ["get_current_user", ...]
+```
+
+#### Issue #3: CORS Configuration Enhancement ✅
+**Cambios:**
+
+**.env.example:**
+```bash
+# CORS (comma-separated or JSON array)
+# Examples:
+#   CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+#   CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:8080
+```
+
+**config.py - Property agregada:**
+```python
+@property
+def cors_origins_list(self) -> List[str]:
+    """Get CORS origins as list."""
+    if isinstance(self.CORS_ORIGINS, list):
+        return self.CORS_ORIGINS
+    return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+```
+
+**main.py - Actualizado:**
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,  # ✅ Usa property
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+#### Issue #4: Text Validation - Whitespace Only ✅
+**Problema:** DesignDataSchema aceptaba texto con solo espacios en blanco
+
+**Solución - field_validator agregado:**
+```python
+from pydantic import field_validator
+
+class DesignDataSchema(BaseModel):
+    text: str = Field(min_length=1, max_length=100)
+    font: Literal[...]
+    color: str = Field(pattern=r'^#[0-9A-Fa-f]{6}$')
+    
+    @field_validator('text')
+    @classmethod
+    def validate_text_not_empty(cls, v: str) -> str:
+        """Ensure text is not just whitespace."""
+        if not v.strip():
+            raise ValueError("Text cannot be empty or whitespace only")
+        return v.strip()
+```
+
+**Test validation:**
+```powershell
+# Input: text="   " (solo espacios)
+# Output: 422 Unprocessable Entity
+{
+  "detail": [{
+    "type": "value_error",
+    "msg": "Value error, Text cannot be empty or whitespace only"
+  }]
+}
+```
+✅ **Result:** Valida correctamente y rechaza whitespace-only text
+
+#### Issue #5: JWT Token Expiry Information ✅
+**Problema:** LoginResponse no incluía información de expiración del token
+
+**Solución:**
+
+**auth_schema.py - Campo agregado:**
+```python
+class LoginResponse(BaseModel):
+    """Login response with token."""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = 10080  # ✅ NUEVO: minutes (7 days)
+    user: UserResponse
+```
+
+**auth.py - Endpoint actualizado:**
+```python
+from app.config import settings
+
+return LoginResponse(
+    access_token=access_token,
+    expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES,  # ✅ NUEVO
+    user=UserResponse.model_validate(user)
+)
+```
+
+**Test validation:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "expires_in": 10080,  // ✅ 7 days in minutes
+  "user": {...}
+}
+```
+✅ **Result:** Cliente puede calcular expiración del token
+
+#### Issue #6: Health Check - Database Validation ✅
+**Problema:** Health check no verificaba conexión real a la base de datos
+
+**Solución - main.py actualizado:**
+```python
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+@app.get("/health", tags=["Health"])
+async def health_check(session: AsyncSession = Depends(get_db_session)):
+    """
+    Health check endpoint.
+    
+    Checks:
+    - API is running
+    - Database connection
+    """
+    # Check database connection
+    db_status = "healthy"
+    try:
+        await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unhealthy"
+    
+    overall_status = "healthy" if db_status == "healthy" else "degraded"
+    
+    return JSONResponse(
+        content={
+            "status": overall_status,
+            "service": "customify-core-api",
+            "version": "1.0.0",
+            "environment": settings.ENVIRONMENT,
+            "database": db_status,  # ✅ NUEVO
+        },
+        status_code=200 if overall_status == "healthy" else 503,
+    )
+```
+
+**Test validation:**
+```json
+{
+  "status": "healthy",
+  "service": "customify-core-api",
+  "version": "1.0.0",
+  "environment": "development",
+  "database": "healthy"  // ✅ Database check
+}
+```
+✅ **Result:** Monitoreo robusto del estado de la API
+
+### 📊 Métricas Post-Correcciones
+
+**Archivos modificados:** 9
+- `.env.example` - CORS documentation
+- `app/config.py` - cors_origins_list property
+- `app/main.py` - Individual exception handlers + health check
+- `app/presentation/schemas/__init__.py` - Exports
+- `app/presentation/schemas/auth_schema.py` - expires_in field
+- `app/presentation/schemas/design_schema.py` - text validation
+- `app/presentation/dependencies/__init__.py` - Exports
+- `app/presentation/api/v1/endpoints/__init__.py` - Format
+- `app/presentation/api/v1/endpoints/auth.py` - expires_in usage
+
+**Tests validados:** 3/3
+- ✅ Health check con database status
+- ✅ Login con expires_in field
+- ✅ Design validation rechaza whitespace
+
+**Líneas modificadas:** +177 / -27
+
+### �🔗 Referencias
 - Clean Architecture: All 4 layers implemented (Domain, Application, Infrastructure, Presentation)
 - FastAPI: Dependencies, middleware, exception handlers, async endpoints
 - Pydantic v2: BaseModel, Field validators, model_validate, ConfigDict
 - JWT Authentication: HTTPBearer, token generation/validation
 - Swagger/OpenAPI: Interactive API documentation at /docs
-- Test Results: 8/8 scenarios passed
+- Test Results: 8/8 scenarios passed + 3/3 corrections validated
 
 ### 📚 Documentación Actualizada
-- `DAILY-LOG.md` - Este archivo (Session 4 completada)
+- `DAILY-LOG.md` - Este archivo (Session 4 + correcciones completadas)
 - Swagger UI: http://localhost:8000/docs
 - OpenAPI Schema: http://localhost:8000/openapi.json
 
 ---
 
-**Session Duration:** ~4 horas
-**Status:** ✅ API Endpoints (Presentation Layer) completos, testeados y validados
-**Tests Status:** 8/8 endpoint tests passing (health, register, login, me, create design, list, get, 404)
+**Session Duration:** ~5 horas (implementación + correcciones)
+**Status:** ✅ API Endpoints (Presentation Layer) completos, corregidos, testeados y validados
+**Tests Status:** 11/11 tests passing (8 endpoint tests + 3 correction validations)
 **Swagger Status:** ✅ Interactive documentation available at /docs
+**Corrections:** ✅ 6/6 critical issues resolved (exception handlers, exports, CORS, validation, JWT expiry, health check)
 **Next Focus:** Frontend integration con React/Next.js
 
 ---
