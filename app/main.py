@@ -7,9 +7,11 @@ FastAPI application with Clean Architecture.
 from fastapi import FastAPI, Request, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+import os
 
 from app.config import settings
 from app.presentation.api.v1.router import api_router
@@ -44,6 +46,15 @@ async def lifespan(app: FastAPI):
     print(f"   Environment: {settings.ENVIRONMENT}")
     print(f"   Debug: {settings.DEBUG}")
     print(f"   Database: Connected")
+    
+    # Create storage directory if using local storage
+    if settings.USE_LOCAL_STORAGE:
+        storage_dir = "./storage"
+        os.makedirs(storage_dir, exist_ok=True)
+        print(f"   Storage: Local ({storage_dir})")
+    else:
+        print(f"   Storage: S3 ({settings.S3_BUCKET_NAME})")
+    
     print("   API Docs: http://localhost:8000/docs")
     print("=" * 60)
     
@@ -78,6 +89,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================================
+# Static Files (for local development)
+# ============================================================
+if settings.USE_LOCAL_STORAGE:
+    # Mount static files directory for serving design previews
+    # Only used when USE_LOCAL_STORAGE=true (development mode)
+    app.mount("/static", StaticFiles(directory="./storage"), name="static")
 
 # ============================================================
 # Exception Handlers

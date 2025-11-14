@@ -18,7 +18,24 @@ class S3Client:
     """
     
     def __init__(self):
-        """Initialize S3 client with credentials from settings."""
+        """
+        Initialize S3 client with credentials from settings.
+        
+        Raises:
+            ValueError: If AWS credentials not configured when USE_LOCAL_STORAGE=false
+        """
+        # Check credentials exist
+        if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+            if not settings.USE_LOCAL_STORAGE:
+                raise ValueError(
+                    "AWS credentials not configured. "
+                    "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, "
+                    "or enable USE_LOCAL_STORAGE=true"
+                )
+            else:
+                logger.warning("⚠️ AWS credentials missing but USE_LOCAL_STORAGE=true, skipping S3 client init")
+                return
+        
         self.s3 = boto3.client(
             's3',
             region_name=settings.AWS_REGION,
@@ -27,6 +44,25 @@ class S3Client:
         )
         self.bucket = settings.S3_BUCKET_NAME
         logger.info(f"Initialized S3 client for bucket: {self.bucket}")
+        
+        # Verify bucket exists and is accessible
+        self._verify_bucket()
+    
+    def _verify_bucket(self):
+        """
+        Verify S3 bucket exists and is accessible.
+        
+        Logs warning if bucket not accessible but doesn't raise exception
+        to allow app to start even if S3 is temporarily unavailable.
+        """
+        try:
+            self.s3.head_bucket(Bucket=self.bucket)
+            logger.info(f"✅ S3 bucket verified: {self.bucket}")
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            logger.warning(f"⚠️ S3 bucket not accessible: {error_code} - {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to verify S3 bucket: {e}")
     
     def upload_file(
         self,
