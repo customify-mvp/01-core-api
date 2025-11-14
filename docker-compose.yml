@@ -1,0 +1,101 @@
+services:
+  # ============================================================
+  # PostgreSQL Database
+  # ============================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: customify-postgres
+    environment:
+      POSTGRES_USER: customify
+      POSTGRES_PASSWORD: customify123
+      POSTGRES_DB: customify_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U customify"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - customify-network
+
+  # ============================================================
+  # Redis Cache
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: customify-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - customify-network
+
+  # ============================================================
+  # Core API (FastAPI)
+  # ============================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: customify-api
+    environment:
+      # App
+      ENVIRONMENT: development
+      DEBUG: "true"
+      
+      # Database (use service name as host)
+      DATABASE_URL: postgresql+asyncpg://customify:customify123@postgres:5432/customify_dev
+      DATABASE_HOST: postgres
+      POSTGRES_USER: customify
+      POSTGRES_PASSWORD: customify123
+      POSTGRES_DB: customify_dev
+      
+      # Redis (use service name as host)
+      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      
+      # JWT
+      JWT_SECRET_KEY: dev-secret-key-change-in-production-min-32-chars
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 10080
+      JWT_REFRESH_TOKEN_EXPIRE_MINUTES: 43200
+      
+      # CORS
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173","http://localhost:8000"]'
+      
+      # Seed data on startup (set to false after first run)
+      SEED_DATA: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - customify-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    stdin_open: true
+    tty: true
+
+networks:
+  customify-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
