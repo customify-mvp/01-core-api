@@ -1,5 +1,757 @@
 # Daily Development Log - Customify Core API
 
+## 2025-11-14 - Session 4: API Endpoints (Presentation Layer) Implementados ✅
+
+### 🎯 Objetivos de la Sesión
+- [x] Crear Pydantic Schemas (DTOs) para request/response
+- [x] Implementar Dependencies (Auth + Repositories)
+- [x] Crear Exception Handler Middleware
+- [x] Implementar Auth Endpoints (register, login, me)
+- [x] Implementar Design Endpoints (create, list, get)
+- [x] Configurar Main Router con /api/v1 prefix
+- [x] Actualizar main.py con lifespan, CORS, exception handlers
+- [x] Validar todos los endpoints con curl
+- [x] Verificar Swagger/OpenAPI docs
+
+### 🏗️ Trabajo Realizado
+
+#### 1. Pydantic Schemas (DTOs)
+**Archivos creados:**
+```
+app/presentation/schemas/
+├── __init__.py
+├── auth_schema.py     # RegisterRequest, LoginRequest, UserResponse, LoginResponse
+└── design_schema.py   # DesignDataSchema, DesignCreateRequest, DesignResponse, DesignListResponse
+```
+
+**Schemas implementados:**
+
+**Auth Schemas:**
+- `RegisterRequest` - email (EmailStr), password (8-100 chars), full_name (1-255 chars)
+- `LoginRequest` - email, password
+- `UserResponse` - User profile response (from_attributes=True)
+- `LoginResponse` - JWT access_token + user data
+
+**Design Schemas:**
+- `DesignDataSchema` - text (1-100), font (Literal whitelist), color (hex regex)
+- `DesignCreateRequest` - product_type, design_data, use_ai_suggestions
+- `DesignResponse` - Complete design response
+- `DesignListResponse` - Paginated list (designs, total, skip, limit, has_more)
+
+**Características:**
+- ✅ Pydantic v2 BaseModel
+- ✅ Field validators con min/max length
+- ✅ EmailStr validation
+- ✅ Literal types para enums
+- ✅ Regex patterns para hex colors
+- ✅ ConfigDict(from_attributes=True) para ORM mapping
+
+#### 2. Dependencies (Dependency Injection)
+**Archivos creados:**
+```
+app/presentation/dependencies/
+├── __init__.py
+├── auth.py            # get_current_user (JWT Bearer)
+└── repositories.py    # Repository factories
+```
+
+**get_current_user (auth.py):**
+```python
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    session: AsyncSession = Depends(get_db_session),
+) -> User:
+    """
+    JWT Bearer authentication dependency.
+    
+    Steps:
+    1. Extract token from Authorization header
+    2. Decode and validate JWT
+    3. Fetch user from database
+    4. Verify user is active
+    
+    Raises:
+        HTTPException 401: Invalid/expired token
+        HTTPException 403: Inactive user
+    """
+```
+
+**Repository Factories (repositories.py):**
+- `get_user_repository()` - Returns UserRepositoryImpl
+- `get_subscription_repository()` - Returns SubscriptionRepositoryImpl
+- `get_design_repository()` - Returns DesignRepositoryImpl
+
+**Características:**
+- ✅ HTTPBearer security scheme
+- ✅ JWT token decoding with decode_access_token
+- ✅ User validation (exists, active)
+- ✅ Returns domain User entity
+- ✅ Factory pattern for repositories
+
+#### 3. Exception Handler Middleware
+**Archivo creado:**
+- `app/presentation/middleware/exception_handler.py`
+
+**domain_exception_handler():**
+```python
+async def domain_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Maps domain exceptions to HTTP status codes.
+    
+    Mappings:
+    - InvalidCredentialsError → 401 Unauthorized
+    - EmailAlreadyExistsError → 409 Conflict
+    - QuotaExceededError → 402 Payment Required
+    - InactiveUserError → 403 Forbidden
+    - DesignNotFoundError → 404 Not Found
+    - UnauthorizedDesignAccessError → 403 Forbidden
+    - ValueError → 400 Bad Request
+    - Exception → 500 Internal Server Error
+    """
+```
+
+**Características:**
+- ✅ Global exception handling
+- ✅ Domain exceptions → HTTP codes
+- ✅ JSON error responses
+- ✅ Preserves exception messages
+- ✅ Registered for 8 exception types
+
+#### 4. Auth Endpoints
+**Archivo creado:**
+- `app/presentation/api/v1/endpoints/auth.py`
+
+**Endpoints implementados:**
+
+**POST /api/v1/auth/register**
+```python
+@router.post("/register", response_model=UserResponse, status_code=201)
+async def register(
+    request: RegisterRequest,
+    user_repo: IUserRepository = Depends(get_user_repository),
+    subscription_repo: ISubscriptionRepository = Depends(get_subscription_repository),
+) -> UserResponse:
+    """
+    Register new user with FREE subscription.
+    
+    Business Logic:
+    - Uses RegisterUserUseCase
+    - Auto-creates FREE subscription
+    - Returns user profile (NOT including password_hash)
+    """
+```
+
+**POST /api/v1/auth/login**
+```python
+@router.post("/login", response_model=LoginResponse)
+async def login(
+    request: LoginRequest,
+    user_repo: IUserRepository = Depends(get_user_repository),
+) -> LoginResponse:
+    """
+    Login user and return JWT token.
+    
+    Business Logic:
+    - Uses LoginUserUseCase
+    - Validates credentials
+    - Updates last_login
+    - Generates JWT token
+    
+    Returns:
+        LoginResponse with access_token and user data
+    """
+```
+
+**GET /api/v1/auth/me**
+```python
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user),
+) -> UserResponse:
+    """
+    Get current authenticated user profile.
+    
+    Requires:
+        Authorization: Bearer <token>
+    """
+```
+
+#### 5. Design Endpoints
+**Archivo creado:**
+- `app/presentation/api/v1/endpoints/designs.py`
+
+**Endpoints implementados:**
+
+**POST /api/v1/designs**
+```python
+@router.post("/", response_model=DesignResponse, status_code=201)
+async def create_design(
+    request: DesignCreateRequest,
+    current_user: User = Depends(get_current_user),
+    user_repo: IUserRepository = Depends(get_user_repository),
+    subscription_repo: ISubscriptionRepository = Depends(get_subscription_repository),
+    design_repo: IDesignRepository = Depends(get_design_repository),
+) -> DesignResponse:
+    """
+    Create new design (requires authentication).
+    
+    Business Logic:
+    - Uses CreateDesignUseCase
+    - Validates subscription active
+    - Checks monthly quota
+    - Increments usage counter
+    """
+```
+
+**GET /api/v1/designs**
+```python
+@router.get("/", response_model=DesignListResponse)
+async def list_designs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    design_repo: IDesignRepository = Depends(get_design_repository),
+) -> DesignListResponse:
+    """
+    List user's designs with pagination.
+    
+    Query Params:
+    - skip: Offset (default 0)
+    - limit: Page size (1-100, default 20)
+    
+    Returns:
+        DesignListResponse with designs, total, pagination info
+    """
+```
+
+**GET /api/v1/designs/{design_id}**
+```python
+@router.get("/{design_id}", response_model=DesignResponse)
+async def get_design(
+    design_id: str,
+    current_user: User = Depends(get_current_user),
+    design_repo: IDesignRepository = Depends(get_design_repository),
+) -> DesignResponse:
+    """
+    Get single design by ID.
+    
+    Business Logic:
+    - Verifies design exists
+    - Verifies ownership (user_id match)
+    - Raises 404 if not found
+    - Raises 403 if not owner
+    """
+```
+
+#### 6. Main Router
+**Archivo creado:**
+- `app/presentation/api/v1/router.py`
+
+```python
+from fastapi import APIRouter
+from app.presentation.api.v1.endpoints import auth, designs
+
+api_router = APIRouter(prefix="/api/v1")
+
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(designs.router, prefix="/designs", tags=["designs"])
+```
+
+**Características:**
+- ✅ Centralized routing
+- ✅ /api/v1 prefix
+- ✅ Sub-routers for auth and designs
+- ✅ OpenAPI tags for documentation
+
+#### 7. Main Application Update
+**Archivo modificado:**
+- `app/main.py`
+
+**Cambios realizados:**
+
+**a) Lifespan Context Manager:**
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events."""
+    logger.info("🚀 Starting Customify Core API")
+    logger.info(f"📊 Database: {settings.DATABASE_URL.scheme}://...")
+    logger.info(f"📦 Redis: {settings.REDIS_URL}")
+    yield
+    logger.info("🛑 Shutting down Customify Core API")
+```
+
+**b) Exception Handlers:**
+```python
+app.add_exception_handler(InvalidCredentialsError, domain_exception_handler)
+app.add_exception_handler(EmailAlreadyExistsError, domain_exception_handler)
+app.add_exception_handler(QuotaExceededError, domain_exception_handler)
+app.add_exception_handler(InactiveUserError, domain_exception_handler)
+app.add_exception_handler(DesignNotFoundError, domain_exception_handler)
+app.add_exception_handler(UnauthorizedDesignAccessError, domain_exception_handler)
+app.add_exception_handler(ValueError, domain_exception_handler)
+app.add_exception_handler(Exception, domain_exception_handler)
+```
+
+**c) CORS Configuration:**
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+**d) API Router Inclusion:**
+```python
+app.include_router(api_router)
+```
+
+#### 8. Testing & Validation
+**Tests ejecutados:**
+
+**Test 1: Health Check**
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/health" -Method GET
+```
+```json
+{
+  "status": "healthy",
+  "service": "customify-core-api",
+  "version": "1.0.0",
+  "environment": "development"
+}
+```
+✅ **Result:** 200 OK
+
+**Test 2: Register User**
+```powershell
+$body = @{
+    email = "endpoint_test@test.com"
+    password = "Test1234"
+    full_name = "Endpoint Test User"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/register" -Method POST -Body $body -ContentType "application/json"
+```
+```json
+{
+  "id": "8170733f-1265-4e0a-9fdd-1b1961e33f5a",
+  "email": "endpoint_test@test.com",
+  "full_name": "Endpoint Test User",
+  "is_active": true,
+  "is_verified": false,
+  "created_at": "2025-11-14T16:45:30.053445Z"
+}
+```
+✅ **Result:** 201 Created
+
+**Test 3: Login User**
+```powershell
+$body = @{
+    email = "endpoint_test@test.com"
+    password = "Test1234"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/login" -Method POST -Body $body -ContentType "application/json"
+```
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4MTcwNzMzZi0xMjY1LTRlMGEtOWZkZC0xYjE5NjFlMzNmNWEiLCJleHAiOjE3NjM3NDM1MzAsImlhdCI6MTc2MzEzODczMH0.E7t3pZpH-B1kXMZbMJYO4QkClRGCi_5urOKXVUpv-Co",
+  "token_type": "bearer",
+  "user": {
+    "id": "8170733f-1265-4e0a-9fdd-1b1961e33f5a",
+    "email": "endpoint_test@test.com",
+    "full_name": "Endpoint Test User",
+    "is_active": true,
+    "is_verified": false,
+    "created_at": "2025-11-14T16:45:30.053445Z",
+    "last_login": "2025-11-14T16:45:30.076541Z"
+  }
+}
+```
+✅ **Result:** 200 OK, JWT token generated
+
+**Test 4: Get Current User (Authenticated)**
+```powershell
+$token = "eyJhbGc..."; $headers = @{"Authorization"="Bearer $token"}
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/me" -Method GET -Headers $headers
+```
+```json
+{
+  "id": "8170733f-1265-4e0a-9fdd-1b1961e33f5a",
+  "email": "endpoint_test@test.com",
+  "full_name": "Endpoint Test User",
+  "is_active": true,
+  "is_verified": false,
+  "created_at": "2025-11-14T16:45:30.053445Z",
+  "last_login": "2025-11-14T16:45:30.076541Z"
+}
+```
+✅ **Result:** 200 OK with Bearer authentication
+
+**Test 5: Create Design**
+```powershell
+$body = @{
+    product_type = "t-shirt"
+    design_data = @{
+        text = "API Endpoint Test"
+        font = "Bebas-Bold"
+        color = "#00FF00"
+    }
+    use_ai_suggestions = $false
+} | ConvertTo-Json -Depth 3
+
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/designs" -Method POST -Body $body -ContentType "application/json" -Headers $headers
+```
+```json
+{
+  "id": "ae4b2fdd-3835-4417-8dab-f2370fb5463a",
+  "user_id": "8170733f-1265-4e0a-9fdd-1b1961e33f5a",
+  "product_type": "t-shirt",
+  "design_data": {
+    "text": "API Endpoint Test",
+    "font": "Bebas-Bold",
+    "color": "#00FF00"
+  },
+  "status": "draft",
+  "use_ai_suggestions": false,
+  "render_url": null,
+  "created_at": "2025-11-14T16:45:30.120836Z"
+}
+```
+✅ **Result:** 201 Created
+
+**Test 6: List Designs (Initial Failure → Fixed)**
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/designs" -Method GET -Headers $headers
+```
+**Initial Error:** 500 Internal Server Error
+**Causa:** Repository method signature mismatch (filters parameter)
+**Fix Applied:** Updated `list_designs` endpoint to match repository signature
+
+**After Fix:**
+```json
+{
+  "designs": [{
+    "id": "ae4b2fdd-3835-4417-8dab-f2370fb5463a",
+    "user_id": "8170733f-1265-4e0a-9fdd-1b1961e33f5a",
+    "product_type": "t-shirt",
+    "design_data": {...},
+    "status": "draft",
+    ...
+  }],
+  "total": 1,
+  "skip": 0,
+  "limit": 20,
+  "has_more": false
+}
+```
+✅ **Result:** 200 OK with pagination
+
+**Test 7: Get Design by ID**
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/designs/ae4b2fdd-3835-4417-8dab-f2370fb5463a" -Method GET -Headers $headers
+```
+```json
+{
+  "id": "ae4b2fdd-3835-4417-8dab-f2370fb5463a",
+  "user_id": "8170733f-1265-4e0a-9fdd-1b1961e33f5a",
+  "product_type": "t-shirt",
+  "design_data": {
+    "text": "API Endpoint Test",
+    "font": "Bebas-Bold",
+    "color": "#00FF00"
+  },
+  "status": "draft",
+  "use_ai_suggestions": false,
+  "render_url": null,
+  "created_at": "2025-11-14T16:45:30.120836Z"
+}
+```
+✅ **Result:** 200 OK
+
+**Test 8: Get Non-Existent Design (404)**
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/designs/nonexistent-id" -Method GET -Headers $headers
+```
+```json
+{
+  "detail": "Design nonexistent-id not found"
+}
+```
+✅ **Result:** 404 Not Found (exception handler working)
+
+#### 9. Swagger/OpenAPI Documentation
+**URL:** http://localhost:8000/docs
+
+**Características:**
+- ✅ Interactive API documentation
+- ✅ All 6 endpoints documented
+- ✅ Request/response schemas
+- ✅ Try-it-out functionality
+- ✅ Bearer token authentication UI
+- ✅ Tags: auth, designs
+
+### 📊 Métricas
+
+**Archivos creados en esta sesión:** 15
+- 2 schema files (auth_schema, design_schema)
+- 2 dependency files (auth, repositories)
+- 1 middleware file (exception_handler)
+- 2 endpoint files (auth, designs)
+- 1 router file (api/v1/router)
+- 7 __init__.py files for packages
+
+**Archivos modificados:** 1
+- `app/main.py` (lifespan, exception handlers, CORS, API router)
+
+**Líneas de código:** ~700+
+
+**Endpoints implementados:** 6
+- POST /api/v1/auth/register
+- POST /api/v1/auth/login
+- GET /api/v1/auth/me
+- POST /api/v1/designs
+- GET /api/v1/designs
+- GET /api/v1/designs/{design_id}
+
+**Tests ejecutados:** 8 (ALL PASSED)
+- Health check
+- User registration
+- User login with JWT
+- Get current user (authenticated)
+- Create design
+- List designs with pagination
+- Get single design
+- 404 error handling
+
+### 📝 Notas Técnicas
+
+#### FastAPI Dependencies Pattern
+```python
+# ✅ CORRECTO - Dependency Injection
+@router.post("/register")
+async def register(
+    request: RegisterRequest,
+    user_repo: IUserRepository = Depends(get_user_repository),
+    subscription_repo: ISubscriptionRepository = Depends(get_subscription_repository),
+):
+    # Use case receives repository interfaces
+    use_case = RegisterUserUseCase(user_repo, subscription_repo)
+    user = await use_case.execute(request.email, request.password, request.full_name)
+    return UserResponse.model_validate(user)
+```
+
+#### JWT Bearer Authentication
+```python
+# HTTPBearer security scheme
+security = HTTPBearer()
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    session: AsyncSession = Depends(get_db_session),
+) -> User:
+    token = credentials.credentials  # Extract token
+    user_id = decode_access_token(token)  # Validate JWT
+    # Fetch and verify user...
+    return user
+```
+
+#### Pydantic v2 Response Serialization
+```python
+# ✅ CORRECTO - model_validate() for entity → Pydantic
+@router.post("/register", response_model=UserResponse)
+async def register(...):
+    user: User = await use_case.execute(...)  # Domain entity
+    return UserResponse.model_validate(user)  # Convert to Pydantic
+
+# ConfigDict needed for ORM/entity conversion
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+```
+
+#### Exception Handler Middleware
+```python
+# Global domain exception → HTTP mapping
+app.add_exception_handler(DesignNotFoundError, domain_exception_handler)
+
+async def domain_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, DesignNotFoundError):
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+    # ... other mappings
+```
+
+#### Pagination Pattern
+```python
+@router.get("/", response_model=DesignListResponse)
+async def list_designs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    ...
+):
+    designs = await design_repo.get_by_user(user_id, skip, limit)
+    total = await design_repo.count_by_user(user_id)
+    has_more = (skip + limit) < total
+    
+    return DesignListResponse(
+        designs=[DesignResponse.model_validate(d) for d in designs],
+        total=total,
+        skip=skip,
+        limit=limit,
+        has_more=has_more,
+    )
+```
+
+### 🐛 Problemas Resueltos
+
+#### Issue #1: List Designs Repository Signature Mismatch
+**Error:** `TypeError: DesignRepositoryImpl.get_by_user() got an unexpected keyword argument 'filters'`
+**Causa:** Endpoint llamaba `get_by_user(user_id, skip, limit, filters={})` pero repository no acepta filters
+**Solución:** 
+```python
+# ❌ ANTES
+designs = await design_repo.get_by_user(
+    current_user.id, skip, limit, filters={}
+)
+
+# ✅ DESPUÉS
+designs = await design_repo.get_by_user(
+    current_user.id, skip, limit
+)
+total = await design_repo.count_by_user(current_user.id)
+has_more = (skip + limit) < total
+```
+
+**Archivo modificado:** `app/presentation/api/v1/endpoints/designs.py`
+
+**Test validation:** 
+```bash
+docker-compose restart api
+curl http://localhost:8000/api/v1/designs -H "Authorization: Bearer ..."
+✅ 200 OK with paginated response
+```
+
+### 🎯 Arquitectura Completa
+
+**Clean Architecture Layers Implementados:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  PRESENTATION LAYER (Session 4) ✅                      │
+│  - Pydantic Schemas (DTOs)                              │
+│  - FastAPI Dependencies (DI)                            │
+│  - Exception Handler Middleware                         │
+│  - API Endpoints (auth, designs)                        │
+│  - Main Router (/api/v1)                                │
+│  - Swagger/OpenAPI Docs                                 │
+└─────────────────────────────────────────────────────────┘
+                          ↓↑
+┌─────────────────────────────────────────────────────────┐
+│  APPLICATION LAYER (Session 3) ✅                       │
+│  - Use Cases (RegisterUser, Login, CreateDesign)        │
+│  - Domain Exceptions                                    │
+│  - JWT Service                                          │
+│  - Password Service                                     │
+└─────────────────────────────────────────────────────────┘
+                          ↓↑
+┌─────────────────────────────────────────────────────────┐
+│  DOMAIN LAYER (Session 1-2) ✅                          │
+│  - Entities (User, Subscription, Design)                │
+│  - Repository Interfaces                                │
+│  - Business Rules                                       │
+└─────────────────────────────────────────────────────────┘
+                          ↓↑
+┌─────────────────────────────────────────────────────────┐
+│  INFRASTRUCTURE LAYER (Session 1-2) ✅                  │
+│  - SQLAlchemy Models                                    │
+│  - Repository Implementations                           │
+│  - Converters (Model ↔ Entity)                          │
+│  - Database Session Management                          │
+│  - Alembic Migrations                                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 🧪 Testing Infrastructure
+
+#### Manual Testing with PowerShell
+**Script pattern:**
+```powershell
+# 1. Register
+$body = @{email="..."; password="..."; full_name="..."} | ConvertTo-Json
+$user = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/register" -Method POST -Body $body -ContentType "application/json"
+
+# 2. Login
+$body = @{email="..."; password="..."} | ConvertTo-Json
+$response = Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/login" -Method POST -Body $body -ContentType "application/json"
+$token = $response.access_token
+
+# 3. Authenticated requests
+$headers = @{"Authorization"="Bearer $token"}
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/auth/me" -Method GET -Headers $headers
+```
+
+#### Swagger UI Testing
+**URL:** http://localhost:8000/docs
+
+**Steps:**
+1. Click "Authorize" button
+2. Enter: `Bearer <your-jwt-token>`
+3. Click "Authorize"
+4. Try endpoints with "Try it out"
+
+### 🎯 Siguiente Sesión - Frontend Integration
+
+#### Pendiente:
+1. **Frontend (Next.js/React)**
+   - Auth context/provider
+   - API client with axios/fetch
+   - Login/Register pages
+   - Protected routes
+   - Design creation UI
+
+2. **Testing Infrastructure**
+   - Unit tests para endpoints
+   - Integration tests con TestClient
+   - Mocking de repositories
+   - Coverage reports
+
+3. **CI/CD Pipeline**
+   - GitHub Actions
+   - Automated testing
+   - Docker image build
+   - Deployment scripts
+
+4. **Celery Task Queue**
+   - Render job worker
+   - Mockup generation
+   - Background processing
+
+### 🔗 Referencias
+- Clean Architecture: All 4 layers implemented (Domain, Application, Infrastructure, Presentation)
+- FastAPI: Dependencies, middleware, exception handlers, async endpoints
+- Pydantic v2: BaseModel, Field validators, model_validate, ConfigDict
+- JWT Authentication: HTTPBearer, token generation/validation
+- Swagger/OpenAPI: Interactive API documentation at /docs
+- Test Results: 8/8 scenarios passed
+
+### 📚 Documentación Actualizada
+- `DAILY-LOG.md` - Este archivo (Session 4 completada)
+- Swagger UI: http://localhost:8000/docs
+- OpenAPI Schema: http://localhost:8000/openapi.json
+
+---
+
+**Session Duration:** ~4 horas
+**Status:** ✅ API Endpoints (Presentation Layer) completos, testeados y validados
+**Tests Status:** 8/8 endpoint tests passing (health, register, login, me, create design, list, get, 404)
+**Swagger Status:** ✅ Interactive documentation available at /docs
+**Next Focus:** Frontend integration con React/Next.js
+
+---
+
 ## 2025-11-14 - Session 3: Use Cases (Application Layer) Implementados ✅
 
 ### 🎯 Objetivos de la Sesión

@@ -7,18 +7,64 @@ FastAPI application with Clean Architecture.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 
 from app.config import settings
+from app.presentation.api.v1.router import api_router
+from app.presentation.middleware.exception_handler import domain_exception_handler
+from app.infrastructure.database.session import close_db
+
+# Import all domain exceptions for handler registration
+from app.domain.exceptions.auth_exceptions import (
+    InvalidCredentialsError,
+    EmailAlreadyExistsError,
+    UserNotFoundError,
+    InactiveUserError,
+)
+from app.domain.exceptions.subscription_exceptions import (
+    QuotaExceededError,
+    InactiveSubscriptionError,
+)
+from app.domain.exceptions.design_exceptions import (
+    DesignNotFoundError,
+    UnauthorizedDesignAccessError,
+)
+
+
+# ============================================================
+# Lifespan context manager
+# ============================================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager (startup/shutdown)."""
+    # Startup
+    print("=" * 60)
+    print("🚀 Customify Core API starting...")
+    print(f"   Environment: {settings.ENVIRONMENT}")
+    print(f"   Debug: {settings.DEBUG}")
+    print(f"   Database: Connected")
+    print("   API Docs: http://localhost:8000/docs")
+    print("=" * 60)
+    
+    yield
+    
+    # Shutdown
+    print("\n" + "=" * 60)
+    print("🛑 Customify Core API shutting down...")
+    await close_db()
+    print("=" * 60)
+
 
 # ============================================================
 # Create FastAPI app
 # ============================================================
 app = FastAPI(
     title="Customify Core API",
-    description="Backend API for Customify - Custom Product Design Platform",
+    description="Backend API for Customify - AI-powered product customization",
     version="1.0.0",
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # ============================================================
@@ -31,6 +77,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================================
+# Register exception handlers
+# ============================================================
+exception_types = [
+    InvalidCredentialsError,
+    EmailAlreadyExistsError,
+    UserNotFoundError,
+    InactiveUserError,
+    QuotaExceededError,
+    InactiveSubscriptionError,
+    DesignNotFoundError,
+    UnauthorizedDesignAccessError,
+    ValueError,
+]
+
+for exc_type in exception_types:
+    app.add_exception_handler(exc_type, domain_exception_handler)
+
+# ============================================================
+# Include API router
+# ============================================================
+app.include_router(api_router)
 
 # ============================================================
 # Health check endpoint
@@ -60,40 +129,21 @@ async def root():
     return {
         "message": "Welcome to Customify Core API",
         "version": "1.0.0",
-        "docs": "/docs" if settings.DEBUG else "Documentation disabled in production",
+        "docs": "/docs",
+        "health": "/health",
+        "api": "/api/v1",
     }
 
-# ============================================================
-# Startup event
-# ============================================================
-@app.on_event("startup")
-async def startup_event():
-    """
-    Execute on application startup.
-    """
-    print("=" * 60)
-    print("🚀 Customify Core API starting...")
-    print(f"   Environment: {settings.ENVIRONMENT}")
-    print(f"   Debug: {settings.DEBUG}")
-    print(f"   Database: Connected")
-    print("=" * 60)
 
 # ============================================================
-# Shutdown event
+# Run with uvicorn
 # ============================================================
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    Execute on application shutdown.
-    """
-    print("\n" + "=" * 60)
-    print("🛑 Customify Core API shutting down...")
-    print("=" * 60)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True
+    )
 
-# ============================================================
-# Future: Register routers here
-# ============================================================
-# from app.presentation.api.v1.endpoints import auth, designs, orders
-# app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
-# app.include_router(designs.router, prefix="/api/v1/designs", tags=["Designs"])
-# app.include_router(orders.router, prefix="/api/v1/orders", tags=["Orders"])
