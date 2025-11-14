@@ -1,5 +1,254 @@
 # Daily Development Log - Customify Core API
 
+## 2025-11-14 - Session 8: Celery Worker Fixes + Storage Enhancements ✅
+
+### 🎯 Objetivos de la Sesión
+- [x] Fix Celery worker task registration (no registraba render_design_preview)
+- [x] Fix task routing configuration (queue assignment)
+- [x] Fix sync_design_repo.py (campos name/description no existen)
+- [x] Add S3 credentials validation
+- [x] Add static files serving para local development
+- [x] Test end-to-end worker processing
+
+### 📊 Resultados Finales
+- ✅ **Worker task registration fixed** - 3 tasks registered (debug_task, render_design_preview, send_email)
+- ✅ **Task routing fixed** - Exact task names en vez de module patterns
+- ✅ **Queue assignment fixed** - high_priority para render, default para email
+- ✅ **Sync repo bug fixed** - Removed non-existent name/description fields
+- ✅ **S3 validation added** - Credentials check + bucket verification
+- ✅ **Static files mounted** - /static endpoint para USE_LOCAL_STORAGE=true
+- ✅ **End-to-end test passed** - draft → rendering → published ✅
+
+### 🏗️ Trabajo Realizado
+
+#### 1. Celery Task Registration Fix
+**Problema:** Worker solo registraba `debug_task`, no `render_design_preview` ni `send_email`
+
+**Causa:** `autodiscover_tasks()` no encontraba los módulos correctamente
+
+**Solución:** Reverted to explicit `include` list
+```python
+# app/infrastructure/workers/celery_app.py
+celery_app = Celery(
+    "customify_workers",
+    broker=str(settings.REDIS_URL),
+    backend=settings.celery_database_url,
+    include=[  # ✅ Explicit include
+        "app.infrastructure.workers.tasks.render_design",
+        "app.infrastructure.workers.tasks.send_email",
+    ]
+)
+```
+
+**Resultado:** `celery inspect registered` ahora muestra:
+```
+* debug_task
+* render_design_preview [rate_limit=10/m]
+* send_email [rate_limit=50/m]
+```
+
+#### 2. Task Routing Fix
+**Problema:** Routing usaba patterns `"*.render_design.*"` que no funcionaban
+
+**Solución:** Changed to exact task names
+```python
+# Before:
+task_routes={
+    "app.infrastructure.workers.tasks.render_design.*": {"queue": "high_priority"},
+}
+
+# After:
+task_routes={
+    "render_design_preview": {"queue": "high_priority"},
+    "send_email": {"queue": "default"},
+    "debug_task": {"queue": "default"},
+}
+```
+
+#### 3. Queue Assignment Fix
+**Problema:** `create_design.py` usaba `delay()` sin queue explícito
+
+**Solución:** Changed to `apply_async` with explicit queue
+```python
+# app/application/use_cases/designs/create_design.py
+# Before:
+render_design_preview.delay(created_design.id)
+
+# After:
+render_design_preview.apply_async(
+    args=[created_design.id],
+    queue='high_priority',
+    routing_key='high_priority'
+)
+```
+
+#### 4. Sync Repository Bug Fix
+**Problema:** Worker failing con `AttributeError: 'Design' object has no attribute 'name'`
+
+**Ubicación:** `app/infrastructure/database/repositories/sync_design_repo.py` líneas 69-70
+
+**Error:**
+```python
+def update(self, design: Design) -> Design:
+    model.name = design.name  # ❌ Design no tiene campo 'name'
+    model.description = design.description  # ❌ Design no tiene 'description'
+```
+
+**Solución:** Removed non-existent fields
+```python
+def update(self, design: Design) -> Design:
+    # Only update fields that exist in Design entity
+    model.status = design.status.value
+    model.preview_url = design.preview_url
+    model.thumbnail_url = design.thumbnail_url
+    model.design_data = design.design_data
+    model.updated_at = design.updated_at
+```
+
+#### 5. S3 Credentials Validation
+**Archivo:** `app/infrastructure/storage/s3_client.py`
+
+**Agregado:**
+```python
+class S3Client:
+    def __init__(self):
+        # Check credentials exist
+        if not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+            if not settings.USE_LOCAL_STORAGE:
+                raise ValueError(
+                    "AWS credentials not configured. "
+                    "Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, "
+                    "or enable USE_LOCAL_STORAGE=true"
+                )
+        
+        # ... initialize boto3 client ...
+        
+        # Verify bucket exists and is accessible
+        self._verify_bucket()
+    
+    def _verify_bucket(self):
+        """Verify S3 bucket exists and is accessible."""
+        try:
+            self.s3.head_bucket(Bucket=self.bucket)
+            logger.info(f"✅ S3 bucket verified: {self.bucket}")
+        except ClientError as e:
+            logger.warning(f"⚠️ S3 bucket not accessible: {e}")
+```
+
+#### 6. Static Files Serving (Local Development)
+**Archivo:** `app/main.py`
+
+**Agregado:**
+```python
+from fastapi.staticfiles import StaticFiles
+import os
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create storage directory if using local storage
+    if settings.USE_LOCAL_STORAGE:
+        storage_dir = "./storage"
+        os.makedirs(storage_dir, exist_ok=True)
+        print(f"   Storage: Local ({storage_dir})")
+    else:
+        print(f"   Storage: S3 ({settings.S3_BUCKET_NAME})")
+    # ...
+
+# Mount static files (for local development)
+if settings.USE_LOCAL_STORAGE:
+    app.mount("/static", StaticFiles(directory="./storage"), name="static")
+```
+
+**Resultado:** Designs accesibles en `http://localhost:8000/static/designs/{id}/preview.png`
+
+#### 7. Test Scripts Created
+**Archivos:**
+- `scripts/test-worker-e2e.ps1` - End-to-end test (login → create → verify)
+- `scripts/test_worker.ps1` - Worker inspection commands
+- `test_worker.py` - Minimal Celery test
+
+#### 8. Task Acknowledgment Settings
+**Agregado a celery_app.py:**
+```python
+task_acks_late=True  # Acknowledge after completion
+task_reject_on_worker_lost=True  # Requeue if worker dies
+task_default_queue="default"
+broker_connection_retry_on_startup=True
+```
+
+### 🧪 Tests Realizados
+
+#### Test 1: Debug Task
+```bash
+$ docker-compose exec worker celery -A app.infrastructure.workers.celery_app inspect registered
+✅ 3 tasks registered
+
+$ python -c "from app.infrastructure.workers.tasks.debug_task import debug_task; result = debug_task.delay(); print(result.get())"
+✅ {'status': 'ok', 'message': 'Celery is working!'}
+```
+
+#### Test 2: End-to-End Design Rendering
+```powershell
+$ .\scripts\test-worker-e2e.ps1
+
+✅ Token obtenido
+✅ Design creado: f565a146-10ad-4c4c-b762-5eed4563f49a
+✅ Status: draft → published
+✅ Preview URL: http://localhost:8000/static/designs/{id}/preview.png
+✅ Thumbnail URL: http://localhost:8000/static/designs/{id}/thumbnail.png
+✅ Files generated: preview.png (2824 bytes), thumbnail.png (797 bytes)
+```
+
+#### Test 3: Static Endpoint
+```bash
+$ curl http://localhost:8000/static/designs/f565a146-10ad-4c4c-b762-5eed4563f49a/preview.png --output test.png
+✅ Image downloaded successfully
+✅ PNG valid (green text "Local Test" on colored background)
+```
+
+### 📦 Archivos Modificados
+```
+app/infrastructure/workers/celery_app.py          # Task registration + routing
+app/application/use_cases/designs/create_design.py  # Queue assignment
+app/infrastructure/database/repositories/sync_design_repo.py  # Remove non-existent fields
+app/infrastructure/storage/s3_client.py            # Credentials validation
+app/main.py                                        # Static files mounting
+scripts/test-worker-e2e.ps1                        # NEW: E2E test
+scripts/test_worker.ps1                            # NEW: Worker inspection
+test_worker.py                                     # NEW: Minimal test
+```
+
+### 🐛 Issues Fixed
+1. **Worker not registering tasks** → Fixed with explicit include list
+2. **Task routing not working** → Fixed with exact task names
+3. **Queue assignment ignored** → Fixed with apply_async explicit queue
+4. **AttributeError on design.name** → Fixed by removing non-existent fields
+5. **No S3 credentials validation** → Added check + bucket verification
+6. **No static serving in dev** → Added /static mount for USE_LOCAL_STORAGE
+
+### 🎓 Lessons Learned
+1. **Celery autodiscover_tasks()** requires specific package structure, explicit include is more reliable
+2. **Task routing** must use exact names as defined in `@task(name="...")`, not module patterns
+3. **apply_async** is preferred over `delay()` when explicit queue control needed
+4. **Sync repositories** (psycopg2) must match entity schema exactly
+5. **Static files** in FastAPI require explicit mount, not automatic
+6. **S3 validation** should happen early (on client init) to catch config issues
+
+### 🚀 Estado del Proyecto
+- ✅ **Worker Processing:** 100% funcional
+- ✅ **Task Registration:** 3/3 tasks registered
+- ✅ **Queue Routing:** high_priority + default working
+- ✅ **Storage Layer:** Local + S3 ready
+- ✅ **Image Generation:** PIL rendering working
+- ✅ **Static Serving:** /static endpoint functional
+- ✅ **End-to-End Flow:** draft → rendering → published ✅
+
+### 📈 Commits
+- `182aef1` - fix: Celery worker task registration and routing
+- `4ce8e96` - feat: Enhance storage layer with validations and static serving
+
+---
+
 ## 2025-11-14 - Session 7: Storage Layer (AWS S3 + PIL) Implementado ✅
 
 ### 🎯 Objetivos de la Sesión
