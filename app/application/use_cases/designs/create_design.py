@@ -88,8 +88,8 @@ class CreateDesignUseCase:
         subscription.increment_usage()
         await self.subscription_repo.update(subscription)
         
-        # TODO: Queue render job (Celery task)
-        # from app.infrastructure.workers.tasks.render_design import render_design_preview
-        # render_design_preview.delay(created_design.id)
+        # 8. Queue render job (Celery task)
+        from app.infrastructure.workers.tasks.render_design import render_design_preview
+        render_design_preview.delay(created_design.id)
         
         return created_design

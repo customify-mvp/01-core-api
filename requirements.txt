@@ -23,6 +23,11 @@ cryptography==42.0.0
 # Cache
 redis==5.0.1
 
+# Background Workers
+celery[sqs]==5.3.4
+kombu==5.3.4
+flower==2.0.1
+
 # HTTP Client
 httpx==0.26.0
 
