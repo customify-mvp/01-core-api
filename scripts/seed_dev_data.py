@@ -12,7 +12,7 @@ Run with: python scripts/seed_dev_data.py
 import asyncio
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 
 # Add project root to path
@@ -61,8 +61,8 @@ async def seed_data():
                 is_active=True,
                 is_verified=True,
                 is_deleted=False,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
                 last_login=None
             )
             session.add(user)
@@ -74,7 +74,7 @@ async def seed_data():
             # 2. Create subscription (free plan)
             # ============================================================
             subscription_id = str(uuid.uuid4())
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             subscription = SubscriptionModel(
                 id=subscription_id,
                 user_id=user.id,
@@ -151,8 +151,8 @@ async def seed_data():
                     preview_url=design_data["preview_url"],
                     thumbnail_url=design_data["thumbnail_url"],
                     is_deleted=False,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc)
                 )
                 session.add(design)
                 print(f"✅ Created design: {design.product_type} - '{design.design_data['text']}' ({design.status})")
