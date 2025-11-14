@@ -15,14 +15,20 @@ def render_design_preview(self, design_id: str) -> dict:
     """
     Render design preview image using PIL and upload to storage.
     
+    **IDEMPOTENT**: Can be safely retried without side effects.
+    - If already rendered (status=PUBLISHED), returns existing URLs
+    - If in progress (status=RENDERING), returns status
+    - If failed, attempts re-render
+    
     Flow:
     1. Get design from database
-    2. Mark as RENDERING
-    3. Generate image using PIL (text on colored background)
-    4. Upload preview to S3/local storage
-    5. Generate thumbnail (resized version)
-    6. Upload thumbnail to S3/local storage
-    7. Mark as PUBLISHED with URLs
+    2. Check if already rendered (idempotency)
+    3. Mark as RENDERING
+    4. Generate image using PIL (text on colored background)
+    5. Upload preview to S3/local storage
+    6. Generate thumbnail (resized version)
+    7. Upload thumbnail to S3/local storage
+    8. Mark as PUBLISHED with URLs
     
     Args:
         design_id: Design ID to render
@@ -30,7 +36,10 @@ def render_design_preview(self, design_id: str) -> dict:
     Returns:
         dict with status, preview_url, and thumbnail_url
     """
-    logger.info(f"Starting render for design {design_id}")
+    logger.info(f"Starting render for design {design_id}", extra={
+        "design_id": design_id,
+        "task_id": self.request.id
+    })
     
     try:
         with get_sync_db_session() as session:
@@ -44,11 +53,39 @@ def render_design_preview(self, design_id: str) -> dict:
             
             logger.debug(f"Design {design_id} found, current status: {design.status.value}")
             
+            # ✅ IDEMPOTENCY CHECK
+            if design.status == DesignStatus.PUBLISHED and design.preview_url:
+                logger.info(
+                    f"Design {design_id} already rendered, skipping",
+                    extra={
+                        "design_id": design_id,
+                        "preview_url": design.preview_url,
+                        "thumbnail_url": design.thumbnail_url
+                    }
+                )
+                return {
+                    "status": "already_rendered",
+                    "design_id": design_id,
+                    "preview_url": design.preview_url,
+                    "thumbnail_url": design.thumbnail_url
+                }
+            
+            # If already rendering, return in-progress status
+            if design.status == DesignStatus.RENDERING:
+                logger.info(f"Design {design_id} already rendering, status check")
+                return {
+                    "status": "in_progress",
+                    "design_id": design_id
+                }
+            
             # Update status to rendering
             design.mark_rendering()
             repo.update(design)
             session.commit()
-            logger.info(f"Design {design_id} marked as rendering")
+            logger.info(f"Design {design_id} marked as rendering", extra={
+                "design_id": design_id,
+                "task_id": self.request.id
+            })
             
             # Render image (PIL)
             logger.debug(f"Rendering image for design {design_id}")
@@ -73,7 +110,14 @@ def render_design_preview(self, design_id: str) -> dict:
             repo.update(design)
             session.commit()
             
-            logger.info(f"Design {design_id} rendered and published successfully")
+            logger.info(
+                f"Design {design_id} rendered and published successfully",
+                extra={
+                    "design_id": design_id,
+                    "preview_url": preview_url,
+                    "thumbnail_url": thumbnail_url
+                }
+            )
             
             return {
                 "status": "success",
@@ -83,7 +127,10 @@ def render_design_preview(self, design_id: str) -> dict:
             }
     
     except Exception as e:
-        logger.error(f"Render failed for design {design_id}: {e}", exc_info=True)
+        logger.error(f"Render failed for design {design_id}: {e}", exc_info=True, extra={
+            "design_id": design_id,
+            "error": str(e)
+        })
         
         # Mark design as failed
         try:

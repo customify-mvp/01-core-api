@@ -17,6 +17,7 @@ from app.config import settings
 from app.presentation.api.v1.router import api_router
 from app.presentation.middleware import SecurityHeadersMiddleware
 from app.infrastructure.database.session import close_db, get_db_session
+from app.infrastructure.logging.structured_logger import init_logger, get_logger
 
 # Import all domain exceptions for handler registration
 from app.domain.exceptions.auth_exceptions import (
@@ -41,7 +42,20 @@ from app.domain.exceptions.design_exceptions import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager (startup/shutdown)."""
+    # Initialize structured logging
+    init_logger(
+        app_name="customify-api",
+        level="DEBUG" if settings.DEBUG else "INFO",
+        use_json=settings.ENVIRONMENT == "production"
+    )
+    logger = get_logger()
+    
     # Startup
+    logger.info("Customify Core API starting", extra={
+        "environment": settings.ENVIRONMENT,
+        "debug": settings.DEBUG,
+        "storage": "Local" if settings.USE_LOCAL_STORAGE else "S3"
+    })
     print("=" * 60)
     print("🚀 Customify Core API starting...")
     print(f"   Environment: {settings.ENVIRONMENT}")
@@ -208,33 +222,101 @@ app.include_router(api_router)
 @app.get("/health", tags=["Health"])
 async def health_check(session: AsyncSession = Depends(get_db_session)):
     """
-    Health check endpoint.
+    Comprehensive health check endpoint.
     
     Checks:
     - API is running
     - Database connection
+    - Redis connection
+    - Celery workers
+    - S3 (if configured)
     
     Returns:
-        dict: Service status, version, and database health
+        200: All systems healthy
+        503: At least one system degraded
     """
-    # Check database connection
-    db_status = "healthy"
+    from datetime import datetime
+    from redis import Redis
+    import json
+    
+    logger = get_logger()
+    
+    health = {
+        "status": "healthy",
+        "service": "customify-core-api",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "environment": settings.ENVIRONMENT,
+        "checks": {}
+    }
+    
+    # Database check
     try:
         await session.execute(text("SELECT 1"))
-    except Exception:
-        db_status = "unhealthy"
+        health["checks"]["database"] = {"status": "healthy"}
+    except Exception as e:
+        logger.error("Database health check failed", exc_info=True)
+        health["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
+        health["status"] = "degraded"
     
-    overall_status = "healthy" if db_status == "healthy" else "degraded"
+    # Redis check
+    try:
+        redis_client = Redis.from_url(str(settings.REDIS_URL), socket_timeout=2)
+        redis_client.ping()
+        redis_client.close()
+        health["checks"]["redis"] = {"status": "healthy"}
+    except Exception as e:
+        logger.error("Redis health check failed", exc_info=True)
+        health["checks"]["redis"] = {"status": "unhealthy", "error": str(e)}
+        health["status"] = "degraded"
+    
+    # Celery worker check
+    try:
+        from app.infrastructure.workers.celery_app import celery_app
+        inspect = celery_app.control.inspect(timeout=2.0)
+        stats = inspect.stats()
+        
+        if stats:
+            worker_count = len(stats)
+            health["checks"]["celery"] = {
+                "status": "healthy",
+                "workers": worker_count
+            }
+        else:
+            health["checks"]["celery"] = {
+                "status": "unhealthy",
+                "error": "No workers available"
+            }
+            health["status"] = "degraded"
+    except Exception as e:
+        logger.error("Celery health check failed", exc_info=True)
+        health["checks"]["celery"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health["status"] = "degraded"
+    
+    # S3 check (only if not using local storage)
+    if not settings.USE_LOCAL_STORAGE:
+        try:
+            from app.infrastructure.storage.s3_client import s3_client
+            # Simple head_bucket check
+            s3_client.s3.head_bucket(Bucket=settings.S3_BUCKET_NAME)
+            health["checks"]["s3"] = {"status": "healthy"}
+        except Exception as e:
+            logger.error("S3 health check failed", exc_info=True)
+            health["checks"]["s3"] = {
+                "status": "unhealthy",
+                "error": str(e)
+            }
+            health["status"] = "degraded"
+    
+    # Determine status code
+    status_code = 200 if health["status"] == "healthy" else 503
     
     return JSONResponse(
-        content={
-            "status": overall_status,
-            "service": "customify-core-api",
-            "version": "1.0.0",
-            "environment": settings.ENVIRONMENT,
-            "database": db_status,
-        },
-        status_code=200 if overall_status == "healthy" else 503,
+        content=health,
+        status_code=status_code,
     )
 
 @app.get("/", tags=["Root"])

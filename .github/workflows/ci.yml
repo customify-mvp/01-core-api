@@ -1,0 +1,226 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install black ruff mypy
+      
+      - name: Run Black
+        run: black --check app/ tests/
+      
+      - name: Run Ruff
+        run: ruff check app/ tests/
+      
+      - name: Run mypy
+        run: mypy app/ --ignore-missing-imports
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: customify
+          POSTGRES_PASSWORD: customify123
+          POSTGRES_DB: customify_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://customify:customify123@localhost:5432/customify_test
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET_KEY: test-secret-key-for-ci-only-min-32-chars
+        run: |
+          pytest --cov=app --cov-report=xml --cov-report=term --cov-fail-under=70
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: true
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install safety
+        run: pip install safety
+      
+      - name: Run safety check
+        run: safety check --file requirements.txt
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]
+    if: github.event_name == 'push'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          push: false
+          tags: customify-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+      - name: Deploy to staging
+        run: |
+          echo "Deploy to staging would happen here"
+          # aws ecs update-service ...
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+      - name: Deploy to production
+        run: |
+          echo "Deploy to production would happen here"
+          # aws ecs update-service ...
+```
+
+---
+
+## 📊 CHECKLIST COMPLETO PARA PRODUCCIÓN
+
+### Código (85% - Casi Listo)
+```
+✅ Clean Architecture implementada
+✅ Domain entities
+✅ Use cases
+✅ Repositories
+✅ API endpoints
+✅ Background workers
+✅ Storage layer
+⚠️ Middleware (Security Headers, Rate Limiting) - CRÍTICO
+⚠️ Composite indexes - CRÍTICO
+⚠️ Eager loading - CRÍTICO
+⚠️ Structured logging - IMPORTANTE
+⚠️ Health check completo - IMPORTANTE
+```
+
+### Documentación (95% - Excelente)
+```
+✅ README.md
+✅ CONTRIBUTING.md
+✅ CHANGELOG.md
+✅ API_REFERENCE.md
+✅ DEPLOYMENT_GUIDE.md
+✅ .env.example
+⚠️ SECURITY.md - FALTA
+⚠️ LICENSE - FALTA
+```
+
+### Testing (77% - Bueno)
+```
+✅ Unit tests
+✅ Integration tests
+✅ Coverage >70%
+⚠️ E2E tests - OPCIONAL
+⚠️ Load tests - OPCIONAL
+```
+
+### DevOps (60% - Parcial)
+```
+✅ Docker Compose (dev)
+✅ Alembic migrations
+⚠️ CI/CD pipeline - FALTA
+⚠️ Dockerfile.prod optimizado - FALTA
+⚠️ Kubernetes manifests - OPCIONAL
+⚠️ Terraform - OPCIONAL
+```
+
+### Security (70% - Mejorable)
+```
+✅ JWT authentication
+✅ Password hashing (bcrypt)
+✅ CORS configurado
+✅ Input validation
+⚠️ Security headers - CRÍTICO
+⚠️ Rate limiting - CRÍTICO
+⚠️ SECURITY.md - FALTA
+⚠️ Dependency scanning - FALTA
+```
+
+### Monitoring (40% - Insuficiente)
+```
+✅ Basic health check
+⚠️ Structured logging - IMPORTANTE
+⚠️ Metrics (Prometheus) - OPCIONAL
+⚠️ Sentry integration - OPCIONAL
+⚠️ CloudWatch alarms - OPCIONAL

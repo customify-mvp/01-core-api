@@ -12,6 +12,7 @@ from app.presentation.dependencies.repositories import (
     get_subscription_repository,
 )
 from app.presentation.dependencies.auth import get_current_user
+from app.presentation.middleware.rate_limiter import create_rate_limit_dependency
 from app.application.use_cases.designs.create_design import CreateDesignUseCase
 from app.domain.repositories.design_repository import IDesignRepository
 from app.domain.repositories.subscription_repository import ISubscriptionRepository
@@ -30,7 +31,8 @@ router = APIRouter(prefix="/designs", tags=["Designs"])
     response_model=DesignResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create new design",
-    description="Create a new product design with text customization."
+    description="Create a new product design with text customization.",
+    dependencies=[Depends(create_rate_limit_dependency(limit=20, window=60))]  # 20 designs/min
 )
 async def create_design(
     request: DesignCreateRequest,
