@@ -1,6 +1,6 @@
 """Design request/response schemas."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 from datetime import datetime
 
@@ -12,6 +12,14 @@ class DesignDataSchema(BaseModel):
     font: Literal['Bebas-Bold', 'Montserrat-Regular', 'Montserrat-Bold', 
                   'Pacifico-Regular', 'Roboto-Regular']
     color: str = Field(pattern=r'^#[0-9A-Fa-f]{6}$')
+    
+    @field_validator('text')
+    @classmethod
+    def validate_text_not_empty(cls, v: str) -> str:
+        """Ensure text is not just whitespace."""
+        if not v.strip():
+            raise ValueError("Text cannot be empty or whitespace only")
+        return v.strip()
     
     model_config = {
         "json_schema_extra": {

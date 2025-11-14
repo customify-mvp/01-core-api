@@ -84,6 +84,18 @@ class Settings(BaseSettings):
                 return [origin.strip() for origin in v.split(",")]
         return v
     
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """
+        Get CORS origins as list.
+        
+        Returns:
+            List[str]: List of allowed CORS origins
+        """
+        if isinstance(self.CORS_ORIGINS, list):
+            return self.CORS_ORIGINS
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+    
     # Encryption (Fernet key for token encryption)
     ENCRYPTION_KEY: str = Field(default="")
     

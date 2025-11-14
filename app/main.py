@@ -4,15 +4,16 @@ Customify Core API - Main application entry point.
 FastAPI application with Clean Architecture.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.presentation.api.v1.router import api_router
-from app.presentation.middleware.exception_handler import domain_exception_handler
-from app.infrastructure.database.session import close_db
+from app.infrastructure.database.session import close_db, get_db_session
 
 # Import all domain exceptions for handler registration
 from app.domain.exceptions.auth_exceptions import (
@@ -72,29 +73,96 @@ app = FastAPI(
 # ============================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ============================================================
-# Register exception handlers
+# Exception Handlers
 # ============================================================
-exception_types = [
-    InvalidCredentialsError,
-    EmailAlreadyExistsError,
-    UserNotFoundError,
-    InactiveUserError,
-    QuotaExceededError,
-    InactiveSubscriptionError,
-    DesignNotFoundError,
-    UnauthorizedDesignAccessError,
-    ValueError,
-]
 
-for exc_type in exception_types:
-    app.add_exception_handler(exc_type, domain_exception_handler)
+@app.exception_handler(InvalidCredentialsError)
+async def invalid_credentials_handler(request: Request, exc: InvalidCredentialsError):
+    """Handle invalid credentials error."""
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(EmailAlreadyExistsError)
+async def email_exists_handler(request: Request, exc: EmailAlreadyExistsError):
+    """Handle email already exists error."""
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(UserNotFoundError)
+async def user_not_found_handler(request: Request, exc: UserNotFoundError):
+    """Handle user not found error."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(InactiveUserError)
+async def inactive_user_handler(request: Request, exc: InactiveUserError):
+    """Handle inactive user error."""
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(QuotaExceededError)
+async def quota_exceeded_handler(request: Request, exc: QuotaExceededError):
+    """Handle quota exceeded error."""
+    return JSONResponse(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(InactiveSubscriptionError)
+async def inactive_subscription_handler(request: Request, exc: InactiveSubscriptionError):
+    """Handle inactive subscription error."""
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(DesignNotFoundError)
+async def design_not_found_handler(request: Request, exc: DesignNotFoundError):
+    """Handle design not found error."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(UnauthorizedDesignAccessError)
+async def unauthorized_design_handler(request: Request, exc: UnauthorizedDesignAccessError):
+    """Handle unauthorized design access error."""
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle value error."""
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": str(exc)}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions."""
+    # TODO: Add proper logging
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"}
+    )
 
 # ============================================================
 # Include API router
@@ -105,20 +173,35 @@ app.include_router(api_router)
 # Health check endpoint
 # ============================================================
 @app.get("/health", tags=["Health"])
-async def health_check():
+async def health_check(session: AsyncSession = Depends(get_db_session)):
     """
     Health check endpoint.
     
-    Returns service status and version.
+    Checks:
+    - API is running
+    - Database connection
+    
+    Returns:
+        dict: Service status, version, and database health
     """
+    # Check database connection
+    db_status = "healthy"
+    try:
+        await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unhealthy"
+    
+    overall_status = "healthy" if db_status == "healthy" else "degraded"
+    
     return JSONResponse(
         content={
-            "status": "healthy",
+            "status": overall_status,
             "service": "customify-core-api",
             "version": "1.0.0",
             "environment": settings.ENVIRONMENT,
+            "database": db_status,
         },
-        status_code=200,
+        status_code=200 if overall_status == "healthy" else 503,
     )
 
 @app.get("/", tags=["Root"])

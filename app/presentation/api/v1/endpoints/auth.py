@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, status
 
+from app.config import settings
 from app.presentation.schemas.auth_schema import (
     RegisterRequest,
     LoginRequest,
@@ -94,6 +95,7 @@ async def login(
     
     return LoginResponse(
         access_token=access_token,
+        expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES,
         user=UserResponse.model_validate(user)
     )
 

@@ -14,6 +14,30 @@ from app.presentation.schemas.design_schema import (
 )
 
 __all__ = [
+    "RegisterRequest",
+    "LoginRequest",
+    "UserResponse",
+    "LoginResponse",
+    "DesignDataSchema",
+    "DesignCreateRequest",
+    "DesignResponse",
+    "DesignListResponse",
+]
+
+from app.presentation.schemas.auth_schema import (
+    RegisterRequest,
+    LoginRequest,
+    UserResponse,
+    LoginResponse,
+)
+from app.presentation.schemas.design_schema import (
+    DesignDataSchema,
+    DesignCreateRequest,
+    DesignResponse,
+    DesignListResponse,
+)
+
+__all__ = [
     # Auth schemas
     "RegisterRequest",
     "LoginRequest",
