@@ -106,8 +106,8 @@ services:
       ENVIRONMENT: development
       DEBUG: "true"
       
-      # Database (use service name as host)
-      DATABASE_URL: postgresql+asyncpg://customify:customify123@postgres:5432/customify_dev
+      # Database (use service name as host, sync driver for Celery)
+      DATABASE_URL: postgresql://customify:customify123@postgres:5432/customify_dev
       DATABASE_HOST: postgres
       POSTGRES_USER: customify
       POSTGRES_PASSWORD: customify123

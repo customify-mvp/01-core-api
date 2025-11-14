@@ -1,6 +1,7 @@
 """Task: Send email."""
 
 from app.infrastructure.workers.celery_app import celery_app
+from app.infrastructure.workers.logging_config import logger
 
 
 @celery_app.task(bind=True, name="send_email")
@@ -26,14 +27,16 @@ def send_email(
     Returns:
         dict with status and message_id
     """
+    logger.info(f"Sending email to {to}: {subject}")
+    
     try:
         # TODO: Actual email sending (AWS SES)
         # For MVP, just log
-        print(f"📧 Email sent to {to}")
-        print(f"   Subject: {subject}")
-        print(f"   Body: {body[:100]}...")
+        logger.debug(f"Email body preview: {body[:100]}...")
         if template:
-            print(f"   Template: {template}")
+            logger.debug(f"Using template: {template}")
+        
+        logger.info(f"Email sent successfully to {to}")
         
         return {
             "status": "success",
@@ -42,5 +45,6 @@ def send_email(
         }
     
     except Exception as e:
-        print(f"❌ Email failed to {to}: {e}")
+        logger.error(f"Email failed to {to}: {e}", exc_info=True)
         raise
+

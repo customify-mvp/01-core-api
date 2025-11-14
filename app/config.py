@@ -96,6 +96,25 @@ class Settings(BaseSettings):
             return self.CORS_ORIGINS
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
+    @property
+    def celery_database_url(self) -> str:
+        """
+        Sync database URL for Celery result backend.
+        
+        Celery doesn't support async drivers, so convert asyncpg → psycopg2.
+        Format: db+postgresql://user:pass@host:port/dbname
+        
+        Returns:
+            str: Sync PostgreSQL URL for Celery
+        """
+        url = str(self.DATABASE_URL)
+        # Remove +asyncpg driver
+        url = url.replace("+asyncpg", "")
+        # Add db+ prefix for SQLAlchemy backend
+        if not url.startswith("db+"):
+            url = "db+" + url
+        return url
+    
     # Encryption (Fernet key for token encryption)
     ENCRYPTION_KEY: str = Field(default="")
     

@@ -7,7 +7,7 @@ from app.config import settings
 celery_app = Celery(
     "customify_workers",
     broker=str(settings.REDIS_URL),  # Development: Redis, Production: SQS
-    backend=f"db+{str(settings.DATABASE_URL).replace('+asyncpg', '')}",  # PostgreSQL
+    backend=settings.celery_database_url,  # PostgreSQL sync driver
     include=[
         "app.infrastructure.workers.tasks.render_design",
         "app.infrastructure.workers.tasks.send_email",

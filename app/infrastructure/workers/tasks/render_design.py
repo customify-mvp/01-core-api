@@ -2,6 +2,7 @@
 
 import asyncio
 from app.infrastructure.workers.celery_app import celery_app
+from app.infrastructure.workers.logging_config import logger
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.infrastructure.database.repositories.design_repo_impl import DesignRepositoryImpl
 from app.domain.entities.design import DesignStatus
@@ -21,12 +22,15 @@ def render_design_preview(self, design_id: str) -> dict:
     Returns:
         dict with status and preview_url
     """
+    logger.info(f"Starting render for design {design_id}")
+    
     try:
         # Run async code in sync Celery task
-        return asyncio.run(_render_design_async(design_id))
+        result = asyncio.run(_render_design_async(design_id))
+        logger.info(f"Completed render for design {design_id}")
+        return result
     except Exception as e:
-        # Log error (TODO: add proper logging)
-        print(f"❌ Render failed for design {design_id}: {e}")
+        logger.error(f"Render failed for design {design_id}: {e}", exc_info=True)
         
         # Mark design as failed
         asyncio.run(_mark_design_failed(design_id, str(e)))
@@ -45,6 +49,8 @@ async def _render_design_async(design_id: str) -> dict:
         if design is None:
             raise ValueError(f"Design {design_id} not found")
         
+        logger.debug(f"Design {design_id} found, marking as rendering")
+        
         # Update status to rendering
         design.mark_rendering()
         await repo.update(design)
@@ -52,6 +58,7 @@ async def _render_design_async(design_id: str) -> dict:
         
         # TODO: Actual rendering logic (PIL/Pillow)
         # For MVP, just simulate rendering delay
+        logger.debug(f"Simulating render for design {design_id} (2s)")
         await asyncio.sleep(2)  # Simulate 2s render time
         
         # Generate mock preview URL (in real version, upload to S3)
@@ -63,7 +70,7 @@ async def _render_design_async(design_id: str) -> dict:
         await repo.update(design)
         await session.commit()
         
-        print(f"✅ Rendered design {design_id}: {preview_url}")
+        logger.info(f"Design {design_id} rendered successfully: {preview_url}")
         
         return {
             "status": "success",
@@ -79,6 +86,8 @@ async def _mark_design_failed(design_id: str, error_message: str):
         repo = DesignRepositoryImpl(session)
         design = await repo.get_by_id(design_id)
         if design:
+            logger.warning(f"Marking design {design_id} as failed: {error_message}")
             design.mark_failed(error_message)
             await repo.update(design)
             await session.commit()
+
