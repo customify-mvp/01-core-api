@@ -6,9 +6,13 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green.svg)](https://fastapi.tiangolo.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://postgresql.org)
 [![Redis](https://img.shields.io/badge/Redis-7-red.svg)](https://redis.io)
-[![Coverage](https://img.shields.io/badge/Coverage-77%25-brightgreen.svg)](https://github.com/customify-mvp/01-core-api)
+[![Coverage](https://img.shields.io/badge/Coverage-68%25-yellow.svg)](https://github.com/customify-mvp/01-core-api)
+[![Tests](https://img.shields.io/badge/Tests-85%20passing-brightgreen.svg)](https://github.com/customify-mvp/01-core-api)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> **Modern, scalable REST API** built with Clean Architecture principles, providing design customization services with AI assistance, background rendering, and e-commerce integrations.
+**Modern, scalable REST API** built with Clean Architecture principles, providing design customization services with AI assistance, background rendering, and e-commerce integrations.
+
 
 ---
 
@@ -587,9 +591,9 @@ psql -U customify -d customify_dev
 SELECT COUNT(*) FROM designs WHERE is_deleted = false;
 
 -- View recent designs
-SELECT id, user_id, product_type, status, created_at 
-FROM designs 
-ORDER BY created_at DESC 
+SELECT id, user_id, product_type, status, created_at
+FROM designs
+ORDER BY created_at DESC
 LIMIT 10;
 ```
 

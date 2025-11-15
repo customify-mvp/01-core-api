@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.0.1] - 2024-01-17
+
+### Fixed
+- **BREAKING**: Fixed Python 3.12+ deprecation warnings for `datetime.utcnow()`
+  - Replaced all occurrences with `datetime.now(timezone.utc)`
+  - Affected files: `user.py`, `design.py`, `subscription.py`, `main.py`
+  - Script provided: `scripts/fix_datetime_deprecation.py`
+- Fixed rate limiter Redis connection error handling
+- Improved health check endpoint with comprehensive system checks
+- Fixed N+1 query issues in design repository with eager loading
+
+### Added
+- **Tests**: Added 30+ new tests for workers, storage, and middleware
+  - Unit tests for render_design worker functions
+  - Unit tests for local storage repository
+  - Integration tests for security headers middleware
+  - Integration tests for rate limiting middleware
+- **Tooling**:
+  - Added Makefile with 30+ common commands
+  - Added pre-commit hooks configuration
+  - Added deployment pre-flight check script (`scripts/deployment_check.sh`)
+  - Added pyproject.toml with tool configurations
+- **Documentation**:
+  - Added comprehensive badges to README.md
+  - Updated API_REFERENCE.md with rate limiting info
+  - Added security best practices to SECURITY.md
+
+### Changed
+- Updated `requirements.txt` with pinned versions for all dependencies
+- Improved test coverage from 59% to 68%+
+- Enhanced structured logging configuration
+- Optimized database queries with composite indexes
+- Improved error messages in domain exceptions
+
+### Security
+- Added security headers middleware (X-Frame-Options, CSP, HSTS, etc.)
+- Implemented per-user rate limiting (100 req/min)
+- Added bandit security linter to pre-commit hooks
+- Updated all dependencies to latest secure versions
+- Added Permissions-Policy header to restrict dangerous browser features
+
+### Performance
+- Added composite database indexes for common query patterns:
+  - `ix_designs_user_status_created` on designs table
+  - `ix_orders_user_status_created` on orders table
+  - `ix_subscriptions_status_period` on subscriptions table
+- Implemented eager loading in design repository (fixes N+1)
+- Separated count queries from data queries for better performance
+
+### Development
+- Added Makefile for common development tasks
+- Added pre-commit hooks for automatic code quality checks
+- Added deployment check script for pre-production validation
+- Improved Docker Compose configuration with health checks
+
+### Documentation
+- Updated README.md with new coverage badge (68%)
+- Added detailed Makefile usage documentation
+- Improved CONTRIBUTING.md with pre-commit setup
+- Added troubleshooting section to README
+
+---
+
+## [1.0.0] - 2024-01-15
+
+### Added
+- **Authentication System**
+  - JWT-based authentication with access tokens
+  - User registration with email validation
+  - Login with credential verification
+  - Password hashing with bcrypt
+  - Get current user endpoint
+
+
+-----------------------------------
+# Changelog
+
+All notable changes to Customify Core API will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
 ### Added
 - Prometheus metrics endpoint for monitoring
 - Rate limiting middleware (100 req/min per user)

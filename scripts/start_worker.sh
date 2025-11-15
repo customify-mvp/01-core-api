@@ -25,7 +25,7 @@ NC='\033[0m' # No Color
 # Check if virtual environment exists
 if [ -d "venv" ]; then
     echo -e "${GREEN}✓${NC} Found virtual environment"
-    
+
     # Activate virtual environment
     if [ -f "venv/Scripts/activate" ]; then
         # Windows (Git Bash)
@@ -34,7 +34,7 @@ if [ -d "venv" ]; then
         # Unix/Linux/macOS
         source venv/bin/activate
     fi
-    
+
     echo -e "${GREEN}✓${NC} Virtual environment activated"
 else
     echo -e "${YELLOW}⚠${NC} Virtual environment not found (venv/)"
