@@ -239,7 +239,11 @@ async def health_check(session: AsyncSession = Depends(get_db_session)):
     from redis import Redis
     import json
     
-    logger = get_logger()
+    # Try to get logger, but don't fail if not initialized (tests)
+    try:
+        logger = get_logger()
+    except RuntimeError:
+        logger = None
     
     health = {
         "status": "healthy",
@@ -255,7 +259,8 @@ async def health_check(session: AsyncSession = Depends(get_db_session)):
         await session.execute(text("SELECT 1"))
         health["checks"]["database"] = {"status": "healthy"}
     except Exception as e:
-        logger.error("Database health check failed", exc_info=True)
+        if logger:
+            logger.error("Database health check failed", exc_info=True)
         health["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
     
@@ -266,7 +271,8 @@ async def health_check(session: AsyncSession = Depends(get_db_session)):
         redis_client.close()
         health["checks"]["redis"] = {"status": "healthy"}
     except Exception as e:
-        logger.error("Redis health check failed", exc_info=True)
+        if logger:
+            logger.error("Redis health check failed", exc_info=True)
         health["checks"]["redis"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
     
@@ -289,7 +295,8 @@ async def health_check(session: AsyncSession = Depends(get_db_session)):
             }
             health["status"] = "degraded"
     except Exception as e:
-        logger.error("Celery health check failed", exc_info=True)
+        if logger:
+            logger.error("Celery health check failed", exc_info=True)
         health["checks"]["celery"] = {
             "status": "unhealthy",
             "error": str(e)
@@ -304,7 +311,8 @@ async def health_check(session: AsyncSession = Depends(get_db_session)):
             s3_client.s3.head_bucket(Bucket=settings.S3_BUCKET_NAME)
             health["checks"]["s3"] = {"status": "healthy"}
         except Exception as e:
-            logger.error("S3 health check failed", exc_info=True)
+            if logger:
+                logger.error("S3 health check failed", exc_info=True)
             health["checks"]["s3"] = {
                 "status": "unhealthy",
                 "error": str(e)

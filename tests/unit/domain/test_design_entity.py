@@ -58,7 +58,7 @@ def test_design_validate_missing_text():
     # Remove text to trigger validation error
     del design.design_data["text"]
     
-    with pytest.raises(ValueError, match="Missing required field: text"):
+    with pytest.raises(ValueError, match="Missing required field for t-shirt: text"):
         design.validate()
 
 

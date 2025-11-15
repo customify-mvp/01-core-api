@@ -175,5 +175,6 @@ async def test_health_check(client: AsyncClient):
     data = response.json()
     assert data["status"] == "healthy"
     assert data["service"] == "customify-core-api"
-    assert "database" in data
-    assert data["database"] == "healthy"
+    assert "checks" in data
+    assert "database" in data["checks"]
+    assert data["checks"]["database"]["status"] == "healthy"
